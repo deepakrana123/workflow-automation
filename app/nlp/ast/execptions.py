@@ -1,0 +1,2 @@
+class ASTValidationError(Exception):
+    pass

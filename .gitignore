@@ -1,0 +1,94 @@
+# =========================
+# 🔐 Secrets & Environment
+# =========================
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.crt
+secrets.json
+
+# =========================
+# 🐍 Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# 🧪 Testing & Coverage
+# =========================
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# =========================
+# 🧾 Logs
+# =========================
+*.log
+logs/
+*.out
+
+# =========================
+# 🗄️ Database / Local Storage
+# =========================
+*.db
+*.sqlite3
+*.sqlite
+*.log.db
+
+# =========================
+# ⚙️ Alembic (IMPORTANT)
+# =========================
+# Keep migrations, ignore cache
+alembic/versions/*.pyc
+alembic/__pycache__/
+
+# =========================
+# 🐳 Docker
+# =========================
+*.tar
+*.pid
+
+# =========================
+# 🧠 LLM / Model Artifacts
+# =========================
+*.gguf
+*.bin
+*.pt
+*.onnx
+models/
+.cache/
+hf_cache/
+
+# =========================
+# 🧑‍💻 IDE / OS
+# =========================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# =========================
+# 📦 Build / Dist
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# 🔁 Temporary files
+# =========================
+*.tmp
+*.bak
+*.old
