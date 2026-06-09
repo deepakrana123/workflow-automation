@@ -1,0 +1,15 @@
+Available Workflow Type:
+finance
+
+Available Triggers:
+
+payment_due
+payment_missed
+loan_requested
+
+Available Actions:
+
+send_reminder
+escalate_case
+notify_manager
+close_case

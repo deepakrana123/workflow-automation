@@ -1,0 +1,18 @@
+Workflow Construction Rules:
+
+1. Workflow must contain exactly one trigger.
+
+2. Workflow may contain one or more actions.
+
+3. Actions may depend on previous actions.
+
+4. Do not create circular dependencies.
+
+5. Use trigger names exactly as supplied.
+
+6. Use action names exactly as supplied.
+
+7. Return JSON only.
+
+8. If a trigger or action is unavailable,
+return a validation error object.
