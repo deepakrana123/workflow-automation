@@ -1,0 +1,13 @@
+workflow_v1.txt
+
+Workflow Type:
+{workflow_type}
+
+Triggers:
+{triggers}
+
+Actions:
+{actions}
+
+User Request:
+{user_request}

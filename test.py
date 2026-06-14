@@ -14,10 +14,12 @@ from app.workflow.workflow_generator import WorkflowGenerator
 from app.nlp.llm_manager.llm_manager import LLMManager
 from app.nlp.prompts.prompt_service import PromptService
 from app.nlp.prompts.prompt_context import PromptContext
+from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
+from app.workflow.workflow_validator import WorkflowValidator
+from app.workflow.execution_plan_builder import ExecutionPlanBuilder
+from app.dsl.dsl_validator import DSLValidator
 
-TEST_CASES = [
-    "If fraud detected lock account and flag for review .When complaint created create support ticket and notify customer . If SLA breached escalate case and notify manager . When appointment missed send medication reminder and notify manager"
-]
+TEST_CASES = ["When payment due send reminder"]
 
 
 def main():
@@ -25,46 +27,54 @@ def main():
     db = SessionLocal()
 
     try:
-        context = PromptContext(
-            workflow_type="finance",
-            triggers=["payment_due"],
-            actions=["send_reminder"],
-            user_request="when payment due send reminder",
+        # context = PromptContext(
+        #     workflow_type="finance",
+        #     triggers=["payment_due"],
+        #     actions=["send_reminder"],
+        #     user_request="when payment due send reminder",
+        # )
+        # service = PromptService()
+        # prompt = service.build(context)
+        # print(prompt)
+
+        trigger_repo = TriggerDefinitionRepository(db)
+        action_repo = ActionDefinitionRepository(db)
+
+        matcher = CatalogMatcher(
+            trigger_repo,
+            action_repo,
         )
 
-        service = PromptService()
-        prompt = service.build(context)
-        print(prompt ,"hlo")
-        # trigger_repo = TriggerDefinitionRepository(db)
-        # action_repo = ActionDefinitionRepository(db)
+        detector = DomainDetector()
+        suitability = SuitabilityAgent()
+        builder = PromptBuilder()
+        llm_manager = LLMManager()
+        workflow = WorkflowGenerator(llm_manager)
+        workflowschemaValidator = WorkflowSchemaValidator()
+        dsl_validator = DSLValidator()
+        workflowvalidator = WorkflowValidator()
+        execution_plan_builder = ExecutionPlanBuilder()
 
-        # matcher = CatalogMatcher(
-        #     trigger_repo,
-        #     action_repo,
-        # )
+        service = NLPWorkflowService(
+            catalog_matcher=matcher,
+            domain_detector=detector,
+            suitability_agent=suitability,
+            prompt_builder=builder,
+            workflow_generator=workflow,
+            schema_validator=workflowschemaValidator,
+            dsl_validator=dsl_validator,
+            workflowvalidator=workflowvalidator,
+            execution_plan_builder=execution_plan_builder,
+        )
 
-        # detector = DomainDetector()
-        # suitability = SuitabilityAgent()
-        # builder = PromptBuilder()
-        # llm_manager = LLMManager()
-        # workflow = WorkflowGenerator(llm_manager)
+        for case in TEST_CASES:
 
-        # service = NLPWorkflowService(
-        #     catalog_matcher=matcher,
-        #     domain_detector=detector,
-        #     suitability_agent=suitability,
-        #     prompt_builder=builder,
-        #     workflow_generator=workflow,
-        # )
+            print("=" * 80)
+            print(case)
 
-        # for case in TEST_CASES:
+            result = service.generate(case)
 
-        #     print("=" * 80)
-        #     print(case)
-
-        #     result = service.generate(case)
-
-        #     print(result)
+            print(result)
 
     finally:
         db.close()
