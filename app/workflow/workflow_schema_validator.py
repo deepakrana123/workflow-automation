@@ -10,12 +10,10 @@ class SchemaValidationResult:
 class WorkflowSchemaValidator:
     def validate(self, workflow: dict) -> SchemaValidationResult:
         errors = []
-
         if "workflow" not in workflow:
             errors.append("workflow_missing")
             return SchemaValidationResult(False, errors)
         wf = workflow["workflow"]
-
         if "triggers" not in wf:
             errors.append("triggers_missing")
         if "actions" not in wf:
@@ -39,4 +37,4 @@ class WorkflowSchemaValidator:
 
             if "dependencies" not in actions:
                 errors.append(f"dependecies_missing:{actions.get('name')}")
-        return SchemaValidationResult(valid=len(errors) == 0, errros=errors)
+        return SchemaValidationResult(valid=len(errors) == 0, errors=errors)

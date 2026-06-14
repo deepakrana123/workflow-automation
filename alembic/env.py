@@ -17,6 +17,7 @@ from app.models.workflowRetryHistory import WorkflowRetryHistory
 from app.models.trace_event import TraceEvent
 from app.models.trigger_definitions import TriggerDefinition
 from app.models.action_definitions import ActionDefinition
+from app.models.generation_log import GenerationLog
 
 config = context.config
 

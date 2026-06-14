@@ -19,7 +19,7 @@ class WorkflowValidator:
         if len(actions) == 0:
             errors.append("at_least_one_action_required")
 
-        action_names = [action["name"] for action in action_names]
+        action_names = [action["name"] for action in actions]
 
         for action in actions:
             for dep in action["dependencies"]:

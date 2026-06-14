@@ -1,9 +1,10 @@
 class DSLValidator:
     def validate(self, dsl: str):
         errors = []
-
-        workflow_count = dsl.count("WORKFLOW")
-        trigger_count = dsl.count("TRIGGER")
+        print(dsl,"dsl")
+        normalized = dsl.upper()
+        workflow_count = normalized.count("WORKFLOW")
+        trigger_count = normalized.count("TRIGGER")
 
         if workflow_count != 1:
             errors.append("workflow_count_invalid")

@@ -1,7 +1,7 @@
 from app.parsers.dsl_parser import parse_dsl
 from app.parsers.dag_validator import validate_dag
 from app.parsers.cache import cache_store
-from app.llm.service import repair_dsl_with_llm
+from app.parsers.repair_service import repair_dsl_with_llm
 from app.metrics.parser_metrics import parser_metrics
 from app.core.logger import logger
 

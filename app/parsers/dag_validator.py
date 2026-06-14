@@ -12,7 +12,7 @@ Validates:
 - allowed trigger/action values
 """
 
-from app.llm.schemas import ALLOWED_TRIGGERS, ALLOWED_ACTIONS
+from app.parsers.schemas import ALLOWED_TRIGGERS, ALLOWED_ACTIONS
 from app.core.logger import logger
 
 

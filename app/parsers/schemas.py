@@ -1,8 +1,8 @@
 # ── ALLOWED TRIGGERS ─────────────────────────────────────────────────────────
-# Generic + Support + Health domains
-# Must stay in sync with: llm/schemas.py, llm/prompts/parser_v1.txt
+# Single source of truth for valid trigger identifiers.
+# Must stay in sync with: nlp/llm_manager prompts, dispatcher.py
 
-ALLOWED_TRIGGERS = {
+ALLOWED_TRIGGERS = [
     # Generic / Finance
     "loan_requested",
     "payment_due",
@@ -31,14 +31,14 @@ ALLOWED_TRIGGERS = {
     "insurance_approved",
     "insurance_denied",
     "followup_due",
-}
+]
 
 
 # ── ALLOWED ACTIONS ───────────────────────────────────────────────────────────
-# Generic + Support + Health domains
-# Must stay in sync with: llm/schemas.py, llm/prompts/parser_v1.txt, dispatcher.py
+# Single source of truth for valid action identifiers.
+# Must stay in sync with: nlp/llm_manager prompts, dispatcher.py
 
-ALLOWED_ACTIONS = {
+ALLOWED_ACTIONS = [
     # Generic
     "send_reminder",
     "escalate_case",
@@ -81,36 +81,4 @@ ALLOWED_ACTIONS = {
     "flag_high_risk_patient",
     "request_insurance_approval",
     "send_wellness_check",
-}
-
-
-def validate_rule(rule: dict):
-    errors = []
-
-    if not rule.get("trigger"):
-        errors.append("trigger is required")
-    if not rule.get("action"):
-        errors.append("action is required")
-
-    if rule.get("trigger") and rule["trigger"] not in ALLOWED_TRIGGERS:
-        errors.append(f"invalid trigger: {rule['trigger']!r}")
-
-    if rule.get("action") and rule["action"] not in ALLOWED_ACTIONS:
-        errors.append(f"invalid action: {rule['action']!r}")
-
-    delay = rule.get("delay_days")
-    if delay is not None:
-        if not isinstance(delay, int):
-            errors.append("delay_days must be integer")
-        elif delay < 0:
-            errors.append("delay_days cannot be negative")
-        elif delay > 365:
-            errors.append("delay_days too large")
-
-    if not isinstance(rule.get("conditions", []), list):
-        errors.append("conditions must be list")
-
-    return {
-        "is_valid": len(errors) == 0,
-        "errors": errors,
-    }
+]
