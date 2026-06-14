@@ -5,6 +5,7 @@ from typing import Optional
 class DomainDetector:
     def detect(self,matched_triggers,matched_actions)->Optional[str]:
         domain_counter=Counter()
+        print(matched_actions,matched_triggers,"hlo")
         for trigger in matched_triggers:
             if getattr(trigger,'workflow_type',None):
                 domain_counter[trigger.workflow_type]+=1
