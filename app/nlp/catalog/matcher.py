@@ -78,7 +78,8 @@ class CatalogMatcher:
 
     @staticmethod
     def _normalize(text: str) -> str:
-        return text.lower().strip()
+        import re
+        return re.sub(r'\s+', ' ', text.lower().strip())
 
     @staticmethod
     def _catalog_text(value: str) -> str:

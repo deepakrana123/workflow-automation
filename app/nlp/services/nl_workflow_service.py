@@ -17,7 +17,8 @@ from app.nlp.domain.domain_detector import DomainDetector
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
 from app.nlp.prompts.builder import PromptBuilder
 from app.nlp.prompts.prompt_context import PromptContext
-from app.nlp.prompts.prompt_version_store import version_store, PROMPT_NAME
+from app.nlp.prompts.prompt_version_store import version_store
+from app.nlp.prompts.builder import PROMPT_NAME
 from app.workflow.workflow_generator import WorkflowGenerator
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator

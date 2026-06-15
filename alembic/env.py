@@ -1,9 +1,13 @@
 from logging.config import fileConfig
+import os
+from dotenv import load_dotenv
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+
+load_dotenv()
 
 from app.db.base import Base
 from app.models.workflow import Workflow
@@ -20,6 +24,12 @@ from app.models.action_definitions import ActionDefinition
 from app.models.generation_log import GenerationLog
 
 config = context.config
+
+# Override sqlalchemy.url from .env — never store credentials in alembic.ini
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise ValueError("DATABASE_URL is not set in environment / .env file")
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

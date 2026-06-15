@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.repositories import workflow as workflow_repo
-from app.parsers.dag_orchestrator import parse_dag_workflow
 
 # NLP pipeline dependencies
 from app.nlp.catalog.matcher import CatalogMatcher
@@ -121,28 +120,30 @@ def generate_workflow_service(
     execution_plan: dict = result["execution_plan"]
     workflow_data: dict = result["workflow"]
 
-    # Parse DSL through dag_orchestrator to get the canonical parsed_rule_json
-    # that the runtime expects (v2 step format)
-    dag_result = parse_dag_workflow(dsl)
-
-    if not dag_result["validation"]["is_valid"]:
-        logger.error(
-            "nl_workflow_dsl_runtime_parse_failed",
-            extra={
-                "extra_data": {
-                    "errors": dag_result["validation"]["errors"],
-                    "dsl": dsl[:200],
-                }
-            },
-        )
-        raise ValueError(
-            f"Generated DSL failed runtime validation: "
-            f"{dag_result['validation']['errors']}"
-        )
+    # Build parsed_rule_json directly from the validated workflow dict.
+    # DSLGenerator output is a display format incompatible with parse_dsl(),
+    # so we never feed it into parse_dag_workflow().
+    trigger_name = workflow_data["triggers"][0]["name"]
+    steps = []
+    for i, action in enumerate(workflow_data["actions"], 1):
+        action_name = action["name"]
+        dep_names = action.get("dependencies", [])
+        # Resolve dependency step ids by matching action names
+        dep_ids = [
+            str(j)
+            for j, a in enumerate(workflow_data["actions"], 1)
+            if a["name"] in dep_names
+        ]
+        steps.append({
+            "id": str(i),
+            "trigger": trigger_name,
+            "action": action_name,
+            "depends_on": dep_ids,
+        })
 
     parsed_rule_json = {
         "version": "v2",
-        "steps": dag_result["steps"],
+        "steps": steps,
     }
 
     saved = workflow_repo.create(
@@ -162,7 +163,7 @@ def generate_workflow_service(
                 "workflow_id": saved.id,
                 "name": saved.name,
                 "domain": saved.domain,
-                "step_count": len(dag_result["steps"]),
+                "step_count": len(steps),
             }
         },
     )
