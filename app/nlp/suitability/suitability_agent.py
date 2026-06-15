@@ -10,7 +10,7 @@ class SuitabilityResult:
 
 class SuitabilityAgent:
     def evaluate(
-        Self, workflow_type: Optional[str], matched_triggers, matched_actions
+        self, workflow_type: Optional[str], matched_triggers, matched_actions
     ) -> SuitabilityResult:
         if not workflow_type:
             return SuitabilityResult(

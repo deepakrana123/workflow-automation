@@ -1,80 +1,76 @@
 """
 app/services/nl_workflow_service.py
 
-Application-layer service for the NL workflow generation route.
+Application-layer orchestrator for NL → workflow generation + save.
 
 Responsibilities:
-- Validate domain
 - Assemble NLPWorkflowService with all dependencies
-- Run generation pipeline
-- Persist result to DB
-- Return structured response
-
-NLPWorkflowService (app/nlp/services/) owns the pipeline logic.
-This file owns the DB transaction and HTTP-layer contract.
+- Run the NLP pipeline (returns compile_result)
+- Hand compile_result to WorkflowPersistenceService to save
+- Return structured HTTP response
 """
 
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
-from app.repositories import workflow as workflow_repo
 
-# NLP pipeline dependencies
+# NLP pipeline
 from app.nlp.catalog.matcher import CatalogMatcher
 from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
 from app.nlp.catalog.actionRepository import ActionDefinitionRepository
-from app.nlp.domain.domain_detector import DomainDetector
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
 from app.nlp.prompts.builder import PromptBuilder
 from app.nlp.llm_manager.llm_manager import LLMManager
 from app.nlp.services.nl_workflow_service import NLPWorkflowService
 
+# Workflow compile + save
 from app.workflow.workflow_generator import WorkflowGenerator
 from app.workflow.workflow_response_parser import WorkflowResponseParser
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator
-from app.workflow.execution_plan_builder import ExecutionPlanBuilder
 from app.workflow.workflow_repair_service import WorkflowRepairService
-from app.dsl.dsl_validator import DSLValidator
+from app.workflow.workflow_complier_Service import WorkflowCompilerService
+from app.workflow.workflow_persistence_service import WorkflowPersistenceService
 from app.dsl.dsl_generator import DSLGenerator
-
+from app.nlp.parsers.rule_parser import RuleParser
+from app.nlp.ast.builder import WorkflowASTBuilder
+from app.nlp.ast.validator import ASTValidator
+from app.nlp.complier.workflow_complier import WorkflowComplier
 
 ALLOWED_DOMAINS = {
-    "support",
-    "health",
-    "loan",
-    "payments",
-    "hr",
-    "logistics",
-    "ecommerce",
+    "support", "health", "loan", "payments",
+    "hr", "logistics", "ecommerce",
 }
 
 
-def _build_nlp_service(db: Session) -> NLPWorkflowService:
-    """
-    Assemble NLPWorkflowService with all dependencies.
-    DB-scoped — trigger/action repos need the session.
-    """
-    trigger_repo = TriggerDefinitionRepository(db)
-    action_repo = ActionDefinitionRepository(db)
+def _build_compiler_service() -> WorkflowCompilerService:
+    return WorkflowCompilerService(
+        dsl_generator=DSLGenerator(),
+        rule_parser=RuleParser(),
+        ast_builder=WorkflowASTBuilder(),
+        ast_validator=ASTValidator(),
+        workflow_compiler=WorkflowComplier(),
+    )
 
+
+def _build_nlp_service(db: Session) -> NLPWorkflowService:
     return NLPWorkflowService(
-        catalog_matcher=CatalogMatcher(trigger_repo, action_repo),
-        domain_detector=DomainDetector(),
+        catalog_matcher=CatalogMatcher(
+            TriggerDefinitionRepository(db),
+            ActionDefinitionRepository(db),
+        ),
         suitability_agent=SuitabilityAgent(),
         prompt_builder=PromptBuilder(),
         workflow_generator=WorkflowGenerator(
             llm_manager=LLMManager(),
             response_parse=WorkflowResponseParser(),
         ),
-        execution_plan_builder=ExecutionPlanBuilder(),
-        workflowvalidator=WorkflowValidator(),
-        dsl_validator=DSLValidator(),
         schema_validator=WorkflowSchemaValidator(),
-        dsl_generator=DSLGenerator(),
+        workflow_validator=WorkflowValidator(),
         workflow_repair_service=WorkflowRepairService(),
+        compiler_service=_build_compiler_service(),
         db=db,
-        domain=None,   # set per-call below
+        domain=None,
     )
 
 
@@ -85,94 +81,41 @@ def generate_workflow_service(
     db: Session,
 ) -> dict:
     """
-    Full NL → workflow pipeline.
-
-    1. Validate domain
-    2. Run NLPWorkflowService.generate()
-    3. Parse DSL through dag_orchestrator for parsed_rule_json
-    4. Persist to DB
-    5. Return structured result
+    Full pipeline: NL → compile → save → return response.
 
     Raises:
-        ValueError: domain invalid, suitability rejected, all retries failed
+        ValueError: invalid domain, suitability rejected, all retries failed
         RuntimeError: unrecoverable LLM failure
     """
     if domain not in ALLOWED_DOMAINS:
-        logger.warning(
-            "nl_workflow_invalid_domain",
-            extra={"extra_data": {"domain": domain}},
+        raise ValueError(
+            f"Invalid domain '{domain}'. Allowed: {sorted(ALLOWED_DOMAINS)}"
         )
-        raise ValueError(f"Invalid domain '{domain}'. "
-                         f"Allowed: {sorted(ALLOWED_DOMAINS)}")
 
     nlp_service = _build_nlp_service(db)
     nlp_service._domain = domain
 
-    logger.info(
-        "nl_workflow_generation_started",
-        extra={"extra_data": {"user_request": user_request[:120], "domain": domain}},
-    )
+    logger.info("nl_workflow_generation_started",
+                extra={"extra_data": {"user_request": user_request[:120], "domain": domain}})
 
-    # Run the full NL → validate → repair → DSL pipeline
-    result = nlp_service.generate(user_request)
+    # NLP pipeline → returns compile_result: {dsl, ast, compiled}
+    compile_result = nlp_service.generate(user_request)
 
-    dsl: str = result["dsl"]
-    execution_plan: dict = result["execution_plan"]
-    workflow_data: dict = result["workflow"]
-
-    # Build parsed_rule_json directly from the validated workflow dict.
-    # DSLGenerator output is a display format incompatible with parse_dsl(),
-    # so we never feed it into parse_dag_workflow().
-    trigger_name = workflow_data["triggers"][0]["name"]
-    steps = []
-    for i, action in enumerate(workflow_data["actions"], 1):
-        action_name = action["name"]
-        dep_names = action.get("dependencies", [])
-        # Resolve dependency step ids by matching action names
-        dep_ids = [
-            str(j)
-            for j, a in enumerate(workflow_data["actions"], 1)
-            if a["name"] in dep_names
-        ]
-        steps.append({
-            "id": str(i),
-            "trigger": trigger_name,
-            "action": action_name,
-            "depends_on": dep_ids,
-        })
-
-    parsed_rule_json = {
-        "version": "v2",
-        "steps": steps,
-    }
-
-    saved = workflow_repo.create(
+    # Persist compiled result
+    persistence = WorkflowPersistenceService()
+    saved = persistence.save(
         db=db,
         name=name,
         domain=domain,
-        raw_input=user_request,
-        parsed_rule_json=parsed_rule_json,
-    )
-    db.commit()
-    db.refresh(saved)
-
-    logger.info(
-        "nl_workflow_created",
-        extra={
-            "extra_data": {
-                "workflow_id": saved.id,
-                "name": saved.name,
-                "domain": saved.domain,
-                "step_count": len(steps),
-            }
-        },
+        user_request=user_request,
+        compile_result=compile_result,
     )
 
     return {
-        "workflow_id": saved.id,
-        "name": saved.name,
-        "domain": saved.domain,
-        "dsl": dsl,
-        "execution_plan": execution_plan,
-        "parsed_rule_json": parsed_rule_json,
+        "workflow_id": saved["workflow_id"],
+        "name": saved["name"],
+        "domain": saved["domain"],
+        "dsl": saved["dsl"],
+        "execution_plan": {},
+        "parsed_rule_json": saved["parsed_rule_json"],
     }

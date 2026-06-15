@@ -1,31 +1,28 @@
 """
 app/nlp/services/nl_workflow_service.py
 
-Full NL → workflow generation pipeline with:
-  - 3-attempt retry loop on primary provider
-  - Fallback to secondary providers after max retries
-  - Generation event logging on every attempt (Phase 3)
-  - Prompt versioning via PromptVersionStore (Phase 4)
-  - Auto-rollback on consecutive failures (Phase 5)
+Full NL → workflow generation pipeline:
+  - CatalogMatcher → SuitabilityAgent → PromptBuilder
+  - LLM call with 3-attempt retry loop + gemini fallback
+  - Schema + workflow validation
+  - WorkflowCompilerService → DSL → AST → compiled parsed_rule_json
+  - Eval logging on every attempt (Phase 3)
+  - Prompt versioning + auto-rollback (Phase 4/5)
 """
 
 import time
 from sqlalchemy.orm import Session
 
 from app.nlp.catalog.matcher import CatalogMatcher
-from app.nlp.domain.domain_detector import DomainDetector
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
-from app.nlp.prompts.builder import PromptBuilder
+from app.nlp.prompts.builder import PromptBuilder, PROMPT_NAME
 from app.nlp.prompts.prompt_context import PromptContext
 from app.nlp.prompts.prompt_version_store import version_store
-from app.nlp.prompts.builder import PROMPT_NAME
 from app.workflow.workflow_generator import WorkflowGenerator
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator
-from app.workflow.execution_plan_builder import ExecutionPlanBuilder
 from app.workflow.workflow_repair_service import WorkflowRepairService
-from app.dsl.dsl_validator import DSLValidator
-from app.dsl.dsl_generator import DSLGenerator
+from app.workflow.workflow_complier_Service import WorkflowCompilerService
 from app.repositories import generation_log_repo
 from app.core.logger import logger
 
@@ -38,32 +35,26 @@ class NLPWorkflowService:
     def __init__(
         self,
         catalog_matcher: CatalogMatcher,
-        domain_detector: DomainDetector,
         suitability_agent: SuitabilityAgent,
         prompt_builder: PromptBuilder,
         workflow_generator: WorkflowGenerator,
-        execution_plan_builder: ExecutionPlanBuilder,
-        workflowvalidator: WorkflowValidator,
-        dsl_validator: DSLValidator,
         schema_validator: WorkflowSchemaValidator,
-        dsl_generator: DSLGenerator,
+        workflow_validator: WorkflowValidator,
         workflow_repair_service: WorkflowRepairService,
+        compiler_service: WorkflowCompilerService,
         db: Session | None = None,
         domain: str | None = None,
     ):
         self.catalog_matcher = catalog_matcher
-        self.domain_detector = domain_detector
         self.suitability_agent = suitability_agent
         self.prompt_builder = prompt_builder
         self.workflow_generator = workflow_generator
-        self.workflow_validator = workflowvalidator
-        self.dsl_validator = dsl_validator
-        self.execution_plan_builder = execution_plan_builder
         self.schema_validator = schema_validator
-        self.dsl_generator = dsl_generator
+        self.workflow_validator = workflow_validator
         self.workflow_repair_service = workflow_repair_service
-        self._db = db           # optional — if None, eval logging is skipped
-        self._domain = domain   # for logging context
+        self.compiler_service = compiler_service
+        self._db = db
+        self._domain = domain
 
     # ------------------------------------------------------------------ #
     #  Public entry point                                                  #
@@ -94,11 +85,11 @@ class NLPWorkflowService:
         prompt_version = build_result.version
         estimated_tokens = build_result.estimated_tokens
 
-        # ── Retry loop on primary provider ─────────────────────────────
         last_errors = None
         last_raw = None
         current_prompt = prompt
 
+        # ── Primary retry loop ─────────────────────────────────────────
         for attempt in range(1, MAX_RETRIES + 1):
             start = time.time()
             provider_used = None
@@ -108,143 +99,66 @@ class NLPWorkflowService:
             except RuntimeError as e:
                 latency_ms = int((time.time() - start) * 1000)
                 last_errors = [str(e)]
-                self._log(
-                    user_request=user_request,
-                    prompt_name=prompt_name,
-                    prompt_version=prompt_version,
-                    estimated_tokens=estimated_tokens,
-                    provider=None,
-                    attempt_number=attempt,
-                    is_fallback=False,
-                    success=False,
-                    failure_reason="llm_error",
-                    errors=last_errors,
-                    latency_ms=latency_ms,
-                )
+                self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                          None, attempt, False, False, "llm_error", last_errors, latency_ms)
                 self._track_failure(prompt_name, user_request)
                 current_prompt = self.workflow_repair_service.repair(
-                    raw_output="",
-                    validation_errors=last_errors,
-                    original_prompt=prompt,
-                )
+                    raw_output="", validation_errors=last_errors, original_prompt=prompt)
                 continue
 
             latency_ms = int((time.time() - start) * 1000)
             valid, outcome = self._validate_workflow(workflow_type, raw_result)
 
             if valid:
-                self._log(
-                    user_request=user_request,
-                    prompt_name=prompt_name,
-                    prompt_version=prompt_version,
-                    estimated_tokens=estimated_tokens,
-                    provider=provider_used,
-                    attempt_number=attempt,
-                    is_fallback=False,
-                    success=True,
-                    failure_reason=None,
-                    errors=None,
-                    latency_ms=latency_ms,
-                )
+                self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                          provider_used, attempt, False, True, None, None, latency_ms)
                 version_store.record_success(prompt_name)
                 return outcome
 
             last_errors = outcome
             last_raw = raw_result
             failure_reason = self._classify_failure(last_errors)
-
-            self._log(
-                user_request=user_request,
-                prompt_name=prompt_name,
-                prompt_version=prompt_version,
-                estimated_tokens=estimated_tokens,
-                provider=provider_used,
-                attempt_number=attempt,
-                is_fallback=False,
-                success=False,
-                failure_reason=failure_reason,
-                errors=last_errors,
-                latency_ms=latency_ms,
-            )
+            self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                      provider_used, attempt, False, False, failure_reason, last_errors, latency_ms)
             self._track_failure(prompt_name, user_request)
             current_prompt = self.workflow_repair_service.repair(
-                raw_output=last_raw,
-                validation_errors=last_errors,
-                original_prompt=prompt,
-            )
+                raw_output=last_raw, validation_errors=last_errors, original_prompt=prompt)
 
-        # ── Fallback providers ──────────────────────────────────────────
+        # ── Fallback providers ─────────────────────────────────────────
         for provider in FALLBACK_PROVIDERS:
-            for fallback_attempt in range(1, 3):   # 2 attempts per fallback provider
+            for fallback_attempt in range(1, 3):
                 start = time.time()
                 try:
                     raw_result = self.workflow_generator.generate_with_provider(
-                        prompt if fallback_attempt == 1 else current_prompt,
-                        provider,
-                    )
+                        prompt if fallback_attempt == 1 else current_prompt, provider)
                 except RuntimeError as e:
                     latency_ms = int((time.time() - start) * 1000)
                     last_errors = [str(e)]
-                    self._log(
-                        user_request=user_request,
-                        prompt_name=prompt_name,
-                        prompt_version=prompt_version,
-                        estimated_tokens=estimated_tokens,
-                        provider=provider,
-                        attempt_number=MAX_RETRIES + fallback_attempt,
-                        is_fallback=True,
-                        success=False,
-                        failure_reason="llm_error",
-                        errors=last_errors,
-                        latency_ms=latency_ms,
-                    )
+                    self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                              provider, MAX_RETRIES + fallback_attempt, True, False,
+                              "llm_error", last_errors, latency_ms)
                     break
 
                 latency_ms = int((time.time() - start) * 1000)
                 valid, outcome = self._validate_workflow(workflow_type, raw_result)
 
                 if valid:
-                    self._log(
-                        user_request=user_request,
-                        prompt_name=prompt_name,
-                        prompt_version=prompt_version,
-                        estimated_tokens=estimated_tokens,
-                        provider=provider,
-                        attempt_number=MAX_RETRIES + fallback_attempt,
-                        is_fallback=True,
-                        success=True,
-                        failure_reason=None,
-                        errors=None,
-                        latency_ms=latency_ms,
-                    )
+                    self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                              provider, MAX_RETRIES + fallback_attempt, True, True,
+                              None, None, latency_ms)
                     version_store.record_success(prompt_name)
                     return outcome
 
                 last_errors = outcome
                 failure_reason = self._classify_failure(last_errors)
-                self._log(
-                    user_request=user_request,
-                    prompt_name=prompt_name,
-                    prompt_version=prompt_version,
-                    estimated_tokens=estimated_tokens,
-                    provider=provider,
-                    attempt_number=MAX_RETRIES + fallback_attempt,
-                    is_fallback=True,
-                    success=False,
-                    failure_reason=failure_reason,
-                    errors=last_errors,
-                    latency_ms=latency_ms,
-                )
+                self._log(user_request, prompt_name, prompt_version, estimated_tokens,
+                          provider, MAX_RETRIES + fallback_attempt, True, False,
+                          failure_reason, last_errors, latency_ms)
                 current_prompt = self.workflow_repair_service.repair(
-                    raw_output=raw_result,
-                    validation_errors=last_errors,
-                    original_prompt=prompt,
-                )
+                    raw_output=raw_result, validation_errors=last_errors, original_prompt=prompt)
 
-        logger.error(
-            "nl_workflow_all_attempts_exhausted",
-            extra={"extra_data": {"last_errors": last_errors}},
-        )
+        logger.error("nl_workflow_all_attempts_exhausted",
+                     extra={"extra_data": {"last_errors": last_errors}})
         raise ValueError(
             f"Workflow generation failed after {MAX_RETRIES} retries "
             f"and {len(FALLBACK_PROVIDERS)} fallback provider(s). "
@@ -252,7 +166,7 @@ class NLPWorkflowService:
         )
 
     # ------------------------------------------------------------------ #
-    #  Validation                                                          #
+    #  Validation + compile                                               #
     # ------------------------------------------------------------------ #
 
     def _validate_workflow(self, workflow_type: str, workflow: dict):
@@ -260,68 +174,42 @@ class NLPWorkflowService:
         if not schema_result.valid:
             return False, schema_result.errors
 
-        workflow_result = self.workflow_validator.validate(workflow)
-        if not workflow_result.valid:
-            return False, workflow_result.errors
+        wf_result = self.workflow_validator.validate(workflow)
+        if not wf_result.valid:
+            return False, wf_result.errors
 
-        dsl = self.dsl_generator.generate(workflow_type, workflow)
-        dsl_result = self.dsl_validator.validate(dsl)
-        if not dsl_result["valid"]:
-            return False, dsl_result["errors"]
+        try:
+            compile_result = self.compiler_service.compile(workflow_type, workflow)
+        except Exception as e:
+            return False, [str(e)]
 
-        execution_plan = self.execution_plan_builder.build(workflow)
-
-        return True, {
-            "workflow": workflow["workflow"],
-            "dsl": dsl,
-            "execution_plan": execution_plan,
-        }
+        return True, compile_result
 
     # ------------------------------------------------------------------ #
-    #  Auto-rollback (Phase 5)                                            #
+    #  Auto-rollback                                                       #
     # ------------------------------------------------------------------ #
 
     def _track_failure(self, prompt_name: str, user_request: str) -> None:
-        """
-        Record failure in version store.
-        If auto-rollback threshold is reached, roll back to previous version.
-        """
         should_rollback = version_store.record_failure(prompt_name)
         if should_rollback:
             try:
                 rolled_back_to = version_store.rollback(prompt_name)
-                logger.warning(
-                    "prompt_auto_rollback_triggered",
-                    extra={
-                        "extra_data": {
-                            "prompt_name": prompt_name,
-                            "rolled_back_to": rolled_back_to,
-                            "user_request": user_request[:80],
-                        }
-                    },
-                )
+                logger.warning("prompt_auto_rollback_triggered",
+                               extra={"extra_data": {
+                                   "prompt_name": prompt_name,
+                                   "rolled_back_to": rolled_back_to,
+                                   "user_request": user_request[:80],
+                               }})
             except ValueError:
-                pass  # No previous version — nothing to roll back to
+                pass
 
     # ------------------------------------------------------------------ #
-    #  Eval logging (Phase 3)                                             #
+    #  Eval logging                                                        #
     # ------------------------------------------------------------------ #
 
-    def _log(
-        self,
-        *,
-        user_request: str,
-        prompt_name: str,
-        prompt_version: str,
-        estimated_tokens: int | None,
-        provider: str | None,
-        attempt_number: int,
-        is_fallback: bool,
-        success: bool,
-        failure_reason: str | None,
-        errors: list | None,
-        latency_ms: int | None,
-    ) -> None:
+    def _log(self, user_request, prompt_name, prompt_version, estimated_tokens,
+             provider, attempt_number, is_fallback, success, failure_reason,
+             errors, latency_ms) -> None:
         if self._db is None:
             return
         generation_log_repo.save(
@@ -351,12 +239,8 @@ class NLPWorkflowService:
             return "trigger_fail"
         if "action" in first:
             return "action_fail"
-        if "dsl" in first or "workflow_count" in first:
-            return "dsl_fail"
+        if "dsl" in first or "ast" in first or "compile" in first:
+            return "compile_fail"
         if "dependency" in first or "circular" in first:
             return "dependency_fail"
         return "validation_fail"
-
-
-# Expose PROMPT_NAME so version_store can be used without importing builder
-PROMPT_NAME = PROMPT_NAME
