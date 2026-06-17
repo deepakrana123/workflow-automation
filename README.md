@@ -1,6 +1,6 @@
 # MFlows — AI Workflow Automation Engine
 
-A production-grade workflow engine that converts natural language requests into executable DAGs, backed by a multi-LLM pipeline with retry, repair, provider health tracking, versioned prompts, and full execution observability.
+A production-grade workflow engine that converts natural language into executable DAGs — backed by a multi-LLM pipeline, a compiler chain (DSL → AST → DAG), distributed execution with retry/DLQ/reaper, and full observability.
 
 ---
 
@@ -9,13 +9,33 @@ A production-grade workflow engine that converts natural language requests into 
 You send a sentence. MFlows produces a running workflow.
 
 ```
-"When payment is due send reminder then notify manager"
-                    ↓
-         Executable DAG with retry, DLQ,
-         distributed tracing, and reaper recovery
+"When payment is missed escalate case and notify manager then create audit record"
+                              ↓
+          @1: payment_missed -> escalate_case
+          @2: payment_missed -> notify_manager
+          @3 @depends(@1,@2): payment_missed -> create_audit_record
+                              ↓
+             Executable DAG — steps 1+2 run in parallel,
+             step 3 runs after both complete
+                              ↓
+             PENDING → RUNNING → COMPLETED
+             with retry, DLQ, reaper recovery, and distributed tracing
 ```
 
 No manual DSL authoring. No drag-and-drop. Natural language in, working automation out.
+
+---
+
+## Test Results (Today)
+
+| Suite | Result |
+|---|---|
+| `test_full_pipeline.py` — 8 execution patterns | ✅ 8/8 |
+| `test_dsl_pipeline.py` — DSL → AST → Compiler | ✅ 5/5 |
+| `test_nlp_to_dsl.py` — Real DB + Real LLM | ✅ 3/3 |
+| `test.py --category A` — Full API (NL → save) | ✅ 5/5 |
+
+Patterns tested: sequential chain, parallel fan-out, diamond, diamond+tail, deep 4-step chain, 3-way parallel, minimal single-step, full support flow.
 
 ---
 
@@ -25,48 +45,76 @@ No manual DSL authoring. No drag-and-drop. Natural language in, working automati
 POST /api/workflows/generate
         │
         ▼
-   CatalogMatcher          ← DB lookup: find matching triggers + actions
+   CatalogMatcher          ← DB lookup: active triggers + actions
+        │                     substring + alias match on user request
+        ▼
+   SuitabilityAgent         ← reject if trigger/action/domain missing
         │
         ▼
-   DomainDetector           ← detect workflow domain (finance, health, support...)
+   PromptBuilder            ← versioned template + token estimate
         │
         ▼
-   SuitabilityAgent         ← reject unsupported or ambiguous requests
+   LLMManager               ← Ollama (primary) → Gemini (fallback)
+   (health-tracked)            3 retries + repair loop on failure
         │
         ▼
-   PromptBuilder            ← load versioned template, interpolate context,
-        │                      estimate token count
-        ▼
-   LLMManager               ← health-tracked, timeout-bound
-   (Ollama → Gemini)           3 retries + gemini fallback
+   WorkflowResponseParser   ← extract + normalize LLM JSON output
         │
         ▼
-   WorkflowGenerator        ← parse LLM JSON response
+   SchemaValidator          ← structure check
+   WorkflowValidator        ← trigger count, action deps
         │
         ▼
-   _validate_workflow()     ← schema → business rules → DSL → DAG
-        │
-   [repair loop if fail]    ← WorkflowRepairService → retry
+   WorkflowCompilerService  ← DSLGenerator → RuleParser → ASTBuilder
+        │                      → ASTValidator → WorkflowCompiler
+        ▼
+   parsed_rule_json          ← {"version":"v2", "trigger":{}, "steps":[]}
         │
         ▼
-   dag_orchestrator         ← parse DSL → v2 step format
-        │
-        ▼
-   parsed_rule_json → DB    ← workflow persisted
+   WorkflowPersistenceService ← save to DB
         │
         ▼
 POST /api/execute/
         │
         ▼
-   Redis queue → Worker
+   Redis queue → consumer worker
         │
         ▼
-   DAG Execution
-   (scheduler → step executor → dispatcher → action handler)
+   runtime_processor → mark RUNNING
+   dag_executor → dag_scheduler (ready steps)
+     → parallel_step_executor (fan-out)
+       → step_executor → dispatcher → action handler
+       → retry_handler → exponential backoff → DLQ
+   workflow_finalizer → COMPLETED / FAILED / DLQ
         │
         ▼
-   Retry / DLQ / Reaper / Tracing
+   reaper_worker — recovers stuck RUNNING executions
+   retry_worker  — processes exponential backoff retries
 ```
+
+---
+
+## Compiler Chain
+
+Natural language → DSL → AST → executable DAG:
+
+```
+LLM JSON output
+  {"workflow": {"triggers": [...], "actions": [...]}}
+        │
+        ▼
+  DSLGenerator
+        │  @1: payment_missed -> escalate_case
+        │  @2: payment_missed -> notify_manager
+        │  @3 @depends(@1,@2): payment_missed -> create_audit_record
+        ▼
+  RuleParser          → ParseNode list
+  WorkflowASTBuilder  → WorkflowAST (trigger + steps)
+  ASTValidator        → cycle detection, duplicate ids, unknown deps
+  WorkflowCompiler    → {"version":"v2", "trigger":{}, "steps":[...]}
+```
+
+The compiler is fully independent — testable without an LLM. The `test_dsl_pipeline.py` suite validates it with injected JSON.
 
 ---
 
@@ -76,11 +124,12 @@ POST /api/execute/
 |---|---|
 | API | FastAPI |
 | Database | PostgreSQL · SQLAlchemy · Alembic |
-| Queue | Redis (BRPOP + sorted set retry) |
-| LLM Primary | Ollama (local, qwen2.5:7b) |
+| Hosted DB | Supabase |
+| Queue | Redis (BRPOP consumer + sorted set retry) |
+| LLM Primary | Ollama (local, configurable model) |
 | LLM Fallback | Google Gemini REST |
 | Tracing IDs | ULID |
-| Workers | API · Retry · Reaper |
+| Workers | consumer · retry_worker · reaper_worker |
 
 ---
 
@@ -88,48 +137,43 @@ POST /api/execute/
 
 ```
 app/nlp/
-├── catalog/                 DB-backed trigger + action lookup
-│   ├── matcher.py           CatalogMatcher — matches user request against catalog
-│   ├── triggerRepository.py TriggerDefinitionRepository
-│   └── actionRepository.py  ActionDefinitionRepository
-├── domain/
-│   └── domain_detector.py   Detects workflow_type from matched catalog entries
-├── suitability/
-│   └── suitability_agent.py Rejects if domain/trigger/action missing
-├── prompts/
-│   ├── versions/
-│   │   └── workflow_generation/
-│   │       └── v1.txt       Active prompt template
-│   ├── builder.py           Builds PromptBuildResult (prompt + version + tokens)
-│   ├── prompt_registry.py   Loads all versions from disk at startup
-│   ├── prompt_version_store.py  Active version tracking + auto-rollback
-│   └── token_estimator.py   Token count estimate (len // 4)
-├── llm_manager/
-│   ├── providers/
-│   │   ├── ollama.py        10s timeout, classified errors
-│   │   └── gemini_rest.py   10s timeout, auth error → 30-min disable
-│   ├── llm_manager.py       Provider routing + health integration
-│   └── provider_health.py   In-memory health state, cooldown, auto re-enable
-├── services/
-│   └── nl_workflow_service.py  Full pipeline orchestrator with eval logging
-├── ast/                     ParseNode list → WorkflowAST
-├── complier/                WorkflowAST → v2 DAG dict
-└── nl/                      Rule-based NL → ParseNode (no LLM)
+├── catalog/            DB-backed trigger + action lookup with alias matching
+├── suitability/        Rejects unsupported requests before LLM call
+├── prompts/            Versioned templates, auto-rollback, token estimation
+├── llm_manager/        Provider routing, health tracking, classified errors
+├── services/           NLPWorkflowService — full orchestration with eval logging
+├── ast/                ParseNode → WorkflowAST, cycle detection
+├── parsers/            RuleParser — @step DSL → ParseNode list
+└── complier/           WorkflowAST → v2 DAG dict
 ```
+
+---
+
+## Execution Patterns Supported
+
+| Pattern | Example |
+|---|---|
+| Sequential | remind → escalate → notify |
+| Parallel fan-out | escalate + notify (no join) |
+| Diamond | assign → (notify_customer \|\| notify_manager) → close |
+| Diamond + tail | escalate + notify → audit |
+| Deep chain | lock → flag → notify → audit |
+| Wide parallel | alert + notify + escalate (3-way) |
 
 ---
 
 ## Prompt System
 
-Every generation uses a versioned prompt template:
+- Templates in `app/nlp/prompts/versions/<name>/<version>.txt`
+- Active version in `PromptVersionStore` (in-memory, swappable to Redis)
+- Auto-rollback after 5 consecutive failures on active version
+- Every attempt logged: version · provider · latency · success/fail · failure reason
 
-- Templates live in `app/nlp/prompts/versions/<name>/<version>.txt`
-- Active version tracked in `PromptVersionStore` (in-memory, swappable to Redis)
-- Promote a version: `POST /api/prompts/workflow_generation/activate`
-- Roll back: `POST /api/prompts/workflow_generation/rollback`
-- Auto-rollback: after 5 consecutive failures on active version, system rolls back automatically
-
-Every attempt logs: prompt version · provider · attempt number · success/fail · failure reason · latency · estimated tokens.
+```http
+POST /api/prompts/workflow_generation/activate   {"version": "v2"}
+POST /api/prompts/workflow_generation/rollback
+GET  /api/prompts/stats
+```
 
 ---
 
@@ -138,20 +182,17 @@ Every attempt logs: prompt version · provider · attempt number · success/fail
 | Condition | Behavior |
 |---|---|
 | 3 consecutive failures | Provider disabled, 5-min cooldown |
-| Auth error (401/403) | Provider disabled immediately, 30-min cooldown |
+| Auth error | Provider disabled immediately, 30-min cooldown |
 | Cooldown expired | Auto re-enabled on next call |
 | Manual override | `POST /api/health/providers/{name}/reset` |
 
-Check state: `GET /api/health/providers`
-
 ---
 
-## Retry and Repair
+## Retry and Repair Loop
 
 | Phase | What happens |
 |---|---|
-| Attempt 1 | Generate with primary provider |
-| Attempts 2–3 | Repair prompt (errors + original) → retry primary |
+| Attempt 1–3 | Generate → validate → compile. If fail, repair prompt → retry |
 | Fallback 1 | Force Gemini with original prompt |
 | Fallback 2 | Repair prompt → retry Gemini |
 | Exhausted | `ValueError` with last errors |
@@ -162,27 +203,36 @@ Check state: `GET /api/health/providers`
 
 ```
 POST /api/execute/
-  → WorkflowRun + WorkflowExecution created
+  → WorkflowRun + WorkflowExecution created (PENDING)
   → Redis lpush "workflow_events"
 
-Worker (BRPOP)
-  → runtime_processor → mark RUNNING
-  → dag_executor (dependency scheduler)
-    → parallel_step_executor
+consumer worker (BRPOP)
+  → runtime_processor → RUNNING
+  → dag_executor → dag_scheduler (finds ready steps by dependency)
+    → parallel_step_executor (concurrent threads for parallel steps)
       → step_executor → dispatcher → action handler
-      → SUCCESS: mark COMPLETED, trace event written
-      → FAILURE: retry_handler → exponential backoff → DLQ after max retries
-  → workflow_finalizer (derives final state from step graph)
+        SUCCESS: mark COMPLETED + trace event
+        FAILURE: retry_handler → exponential backoff (30s, 60s, 120s...)
+                 → DLQ after MAX_RETRIES
+  → workflow_finalizer
+      all COMPLETED → mark workflow COMPLETED
+      any DLQ      → mark workflow FAILED
+      any RETRY    → defer finalization
 
-Reaper Worker
-  → scans for RUNNING executions stuck > 60s → marks FAILED → recovers
+reaper_worker (every 5s)
+  → finds RUNNING executions stuck > 60s
+  → marks FAILED → re-queues → max 3 recovery attempts → DLQ
+
+retry_worker (every 5s)
+  → reads sorted set by score (retry_at timestamp)
+  → executes due retries atomically (pipeline zrem)
 ```
 
 ---
 
 ## Chaos Testing
 
-Set `CHAOS_MODE=true` to route all action dispatches through the chaos engine.
+Set `CHAOS_MODE=true` to route all dispatches through the chaos engine.
 
 Modes: `success` · `always_fail` · `timeout` · `slow` · `gateway_error` · `rate_limit` · `auth_error` · `bad_payload` · `partial_success` · `flaky` · `fail_on_attempt` · `succeed_after_retries`
 
@@ -194,43 +244,76 @@ Modes: `success` · `always_fail` · `timeout` · `slow` · `gateway_error` · `
 git clone <repo>
 cd mflows
 cp .env.example .env
-# Set DATABASE_URL, GEMINI_API_KEY, GEMINI_MODEL, REDIS_HOST
+# Set DATABASE_URL, GEMINI_API_KEY, REDIS_HOST
 
 alembic upgrade head
 docker-compose up --build
 ```
 
-Services: `api` (8000) · `worker` · `retry_worker` · `reaper_worker` · `redis`
+Services started: `api:8000` · `worker` · `retry_worker` · `reaper_worker` · `redis`
+
+**Run only API + Redis (skip workers):**
+```bash
+docker-compose up --build api redis
+```
+
+---
+
+## Quick Test
+
+```bash
+# Generate a workflow
+curl -X POST http://localhost:8000/api/workflows/generate \
+  -H "Content-Type: application/json" \
+  -d '{"user_request": "When payment is missed escalate case and notify manager", "name": "payment-flow", "domain": "payments"}'
+
+# Execute it
+curl -X POST http://localhost:8000/api/execute/ \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_id": 1, "entity_id": "customer-001"}'
+```
+
+---
+
+## Test Suites
+
+```bash
+# DSL → AST → Compiler (no Docker needed)
+python test_dsl_pipeline.py
+
+# Real DB + Real LLM → DSL (needs api + redis)
+python test_nlp_to_dsl.py
+
+# Full execution: compile → save → execute → COMPLETED (needs all services)
+python test_full_pipeline.py
+python test_full_pipeline.py --id P03   # single case
+
+# Full API chaos suite
+python test.py --category A --verbose
+python test.py --verbose
+```
 
 ---
 
 ## API Reference
 
 ```http
-# Workflow Creation
-POST /api/workflows/generate
-Body: { "user_request": "...", "name": "...", "domain": "..." }
+POST /api/workflows/generate        NL → compile → save
+GET  /api/workflows/                list workflows
+GET  /api/workflows/{id}            get workflow
 
-# Workflow Read
-GET  /api/workflows/
-GET  /api/workflows/{id}
-
-# Execution
-POST /api/execute/
+POST /api/execute/                  queue execution
 POST /api/execute/{id}/pause
 POST /api/execute/{id}/resume
 
-# LLM Health
-GET  /api/health/providers
+GET  /api/health/providers          LLM provider health
 POST /api/health/providers/{name}/reset
 
-# Prompt Management
-GET  /api/prompts/
-GET  /api/prompts/stats
-GET  /api/prompts/{name}/state
-POST /api/prompts/{name}/activate     Body: { "version": "v2" }
+GET  /api/prompts/                  list prompts + versions
+GET  /api/prompts/stats             pass rate by version
+POST /api/prompts/{name}/activate   promote version
 POST /api/prompts/{name}/rollback
-GET  /api/prompts/{name}/failures
+GET  /api/prompts/{name}/failures   last N failures
 ```
 
 ---
@@ -242,9 +325,6 @@ GET  /api/prompts/{name}/failures
 | `DATABASE_URL` | required | PostgreSQL connection string |
 | `REDIS_HOST` | `localhost` | Redis hostname |
 | `GEMINI_API_KEY` | required | Google Gemini API key |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
-| `OLLAMA_URL` | `host.docker.internal:11434` | Ollama endpoint |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model |
 | `OLLAMA_TIMEOUT_SECONDS` | `10` | Ollama request timeout |
 | `GEMINI_TIMEOUT_SECONDS` | `10` | Gemini request timeout |
 | `CHAOS_MODE` | `false` | Enable chaos action routing |
@@ -253,28 +333,23 @@ GET  /api/prompts/{name}/failures
 
 ## Current Status
 
-### Completed
-- NL → Workflow pipeline (CatalogMatcher → LLM → Validate → DSL → DB)
-- Multi-LLM provider routing (Ollama primary, Gemini fallback)
-- LLM health tracking with cooldown and auto re-enable
-- Configurable timeouts with classified error types
-- 3-retry repair loop + provider fallback
-- Versioned prompt system with file-based templates
-- Prompt evaluation logging (every attempt recorded)
-- Auto-rollback on 5 consecutive prompt failures
-- Token estimation per prompt build
-- Runtime Engine (DAG executor, step executor, finalizer)
-- Retry Engine (exponential backoff, DLQ, retry worker)
-- Reaper Recovery (stuck execution detection)
-- Distributed Locking (Redis NX)
-- Distributed Tracing (ULID trace_id / span_id)
-- DSL Parser + DAG Validator
-- AST Builder + AST Validator + Workflow Compiler
-- Chaos testing engine (13 modes)
-- Full API surface with health + prompt management endpoints
+### Done
+- NL → DSL → AST → DAG compiler pipeline
+- Multi-LLM routing (Ollama → Gemini) with health tracking + cooldown
+- 3-retry repair loop + fallback provider
+- Versioned prompt system with auto-rollback
+- Eval logging (every attempt: version, provider, latency, outcome)
+- Full DAG execution engine (sequential + parallel + diamond)
+- Retry engine (exponential backoff, Redis sorted set)
+- DLQ after max retries
+- Reaper recovery (stuck execution detection + re-queue)
+- Distributed locking (Redis NX)
+- Distributed tracing (ULID trace_id + span_id per step)
+- Chaos testing engine (13 failure modes)
+- 8 execution pattern tests all passing
 
 ### Next
-- 500+ chaos test suite across all pipeline stages
-- Semantic search for CatalogMatcher (pgvector on Supabase)
-- Multi-tenant workflow isolation
-- Agent workflows (multi-step LLM reasoning)
+- Multi-agent architecture (GenerationAgent · ValidationAgent · RepairAgent)
+- Semantic search fallback for CatalogMatcher (pgvector)
+- RAG-based few-shot examples from generation logs
+- MCP integration for external action handlers

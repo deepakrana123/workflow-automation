@@ -1,7 +1,7 @@
 import os
 from app.execution.actions import (
     send_reminder, escalate_case, assign_senior_officer,
-    notify_manager, close_case, reject_loan, validate_payment_handler,
+    notify_manager, notify_customer, close_case, reject_loan, validate_payment_handler,
     send_email_notification, send_sms_notification, send_push_notification,
     create_audit_record, trigger_webhook, update_entity_status,
     flag_for_review, lock_account, unlock_account, generate_report,
@@ -35,6 +35,7 @@ _PRODUCTION_ACTION_MAP = {
     "escalate_case":           escalate_case,
     "assign_senior_officer":   assign_senior_officer,
     "notify_manager":          notify_manager,
+    "notify_customer":         notify_customer,
     "close_case":              close_case,
     "reject_loan":             reject_loan,
     "validate_payment":        validate_payment_handler,

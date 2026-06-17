@@ -29,7 +29,7 @@ from app.workflow.workflow_response_parser import WorkflowResponseParser
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator
 from app.workflow.workflow_repair_service import WorkflowRepairService
-from app.workflow.workflow_complier_Service import WorkflowCompilerService
+from app.workflow.workflow_compiler_service import WorkflowCompilerService
 from app.workflow.workflow_persistence_service import WorkflowPersistenceService
 from app.dsl.dsl_generator import DSLGenerator
 from app.nlp.parsers.rule_parser import RuleParser
@@ -38,8 +38,9 @@ from app.nlp.ast.validator import ASTValidator
 from app.nlp.complier.workflow_complier import WorkflowComplier
 
 ALLOWED_DOMAINS = {
-    "support", "health", "loan", "payments",
-    "hr", "logistics", "ecommerce",
+    "finance",
+    "health",
+    "support",
 }
 
 

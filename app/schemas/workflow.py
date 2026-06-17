@@ -28,7 +28,7 @@ class WorkflowResponse(BaseModel):
 class WorkflowGenerateRequest(BaseModel):
     user_request: str   # natural language sentence
     name: str           # workflow name to store
-    domain: str         # support | health | loan | payments | hr | logistics | ecommerce
+    domain: str         # finance | health | support
 
 
 class WorkflowGenerateResponse(BaseModel):

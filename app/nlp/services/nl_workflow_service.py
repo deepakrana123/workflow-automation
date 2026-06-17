@@ -22,7 +22,7 @@ from app.workflow.workflow_generator import WorkflowGenerator
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator
 from app.workflow.workflow_repair_service import WorkflowRepairService
-from app.workflow.workflow_complier_Service import WorkflowCompilerService
+from app.workflow.workflow_compiler_service import WorkflowCompilerService
 from app.repositories import generation_log_repo
 from app.core.logger import logger
 

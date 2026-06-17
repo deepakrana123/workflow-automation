@@ -19,13 +19,9 @@ from app.core.logger import logger
 
 
 ALLOWED_DOMAINS = {
-    "support",
+    "finance",
     "health",
-    "loan",
-    "payments",
-    "hr",
-    "logistics",
-    "ecommerce",
+    "support",
 }
 
 

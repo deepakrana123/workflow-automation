@@ -70,6 +70,28 @@ CASES = [
     ("H03", "When medication is overdue send medication reminder then notify manager"),
     ("H04", "When lab result is ready notify lab result and alert care team"),
     ("H05", "When patient is discharged send discharge instructions and create audit record"),
+
+    # ── Boundary — phrasing variants ──────────────────────────────────────────
+    ("B01", "payment is due send reminder"),                                          # no when keyword
+    ("B02", "WHEN PAYMENT IS DUE SEND REMINDER THEN ESCALATE CASE"),                 # all caps
+    ("B03", "When   payment   is   due   send   reminder"),                           # extra whitespace
+    ("B04", "When payment due remind and notify"),                                    # terse minimal
+    ("B05", "When fraud detected lock account then flag for review then audit it"),   # unknown action at end
+
+    # ── Boundary — multi-action chains ────────────────────────────────────────
+    ("C01", "When payment is missed send reminder then escalate case then notify manager then create audit record"),  # 4-step chain
+    ("C02", "When ticket created assign support agent then send customer update and notify manager then resolve ticket then close case"),  # 5-step mixed
+    ("C03", "When fraud detected lock account and flag for review then notify manager and create audit record"),      # two parallel pairs
+
+    # ── Boundary — domain crossing ────────────────────────────────────────────
+    ("D01", "When critical vitals detected alert care team and notify manager and escalate to specialist"),  # 3-way parallel health
+    ("D02", "When complaint created create support ticket and notify manager"),                               # support parallel
+    ("D03", "When account locked notify manager then create audit record then generate report"),              # finance 3-step
+
+    # ── Edge — LLM stress ─────────────────────────────────────────────────────
+    ("E01", "When payment is due send reminder"),                                     # single action minimal
+    ("E02", "When ticket created assign support agent"),                              # single action support
+    ("E03", "When patient discharged send discharge instructions"),                   # single action health
 ]
 
 # shared instances
