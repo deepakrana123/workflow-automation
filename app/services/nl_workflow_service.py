@@ -36,7 +36,7 @@ from app.nlp.parsers.rule_parser import RuleParser
 from app.nlp.ast.builder import WorkflowASTBuilder
 from app.nlp.ast.validator import ASTValidator
 from app.nlp.complier.workflow_complier import WorkflowComplier
-
+from app.semantic.semantic_catalog_retriever import SemanticCatalogRetriever
 ALLOWED_DOMAINS = {
     "finance",
     "health",
@@ -59,6 +59,7 @@ def _build_nlp_service(db: Session) -> NLPWorkflowService:
         catalog_matcher=CatalogMatcher(
             TriggerDefinitionRepository(db),
             ActionDefinitionRepository(db),
+            SemanticCatalogRetriever(),
         ),
         suitability_agent=SuitabilityAgent(),
         prompt_builder=PromptBuilder(),

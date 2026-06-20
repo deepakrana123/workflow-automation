@@ -92,6 +92,56 @@ CASES = [
     ("E01", "When payment is due send reminder"),                                     # single action minimal
     ("E02", "When ticket created assign support agent"),                              # single action support
     ("E03", "When patient discharged send discharge instructions"),                   # single action health
+
+   ("P01", "When payment is missed notify manager and create audit record"),
+("P02", "When fraud detected lock account and notify manager"),
+("P03", "When ticket created notify customer and notify manager"),
+("P04", "When patient admitted notify manager and alert care team"),
+("P05", "When critical vitals detected alert care team and escalate to specialist"),
+
+("D10", "When payment missed escalate case and notify manager then create audit record"),
+("D11", "When fraud detected lock account and flag for review then notify manager"),
+("D12", "When ticket created assign support agent then notify customer and notify manager then close case"),
+("D13", "When patient admitted schedule appointment and notify manager then create audit record"),
+("D14", "When complaint created create support ticket and notify manager then escalate case"),
+
+("L01", "When payment due send reminder then escalate case then notify manager then create audit record"),
+("L02", "When fraud detected lock account then flag for review then notify manager then create audit record"),
+("L03", "When ticket created assign support agent then send customer update then resolve ticket then close case"),
+("L04", "When patient admitted schedule appointment then notify manager then create audit record"),
+("L05", "When medication overdue send medication reminder then notify manager then create audit record"),
+
+("M01", "When payment missed send reminder and notify manager then escalate case"),
+("M02", "When fraud detected lock account and flag for review then create audit record"),
+("M03", "When ticket created notify customer and notify manager then resolve ticket"),
+("M04", "When patient discharged send discharge instructions and notify manager then create audit record"),
+("M05", "When critical vitals detected alert care team and escalate to specialist then notify manager"),
+
+("N01", "payment due remind customer"),
+("N02", "payment missed escalate"),
+("N03", "fraud detected lock immediately"),
+("N04", "new ticket assign agent"),
+("N05", "patient admitted book appointment"),
+
+("X01", "handle payment"),
+("X02", "process ticket"),
+("X03", "manage fraud"),
+("X04", "help patient"),
+("X05", "send notification"),
+
+("U01", "When payment due send sms"),
+("U02", "When ticket created send whatsapp message"),
+("U03", "When patient admitted call doctor"),
+("U04", "When fraud detected freeze card permanently"),
+("U05", "When complaint created send email blast"),
+
+("T01", "When payment due send reminder then escalate case then notify manager then create audit record then notify customer"),
+("T02", "When ticket created assign support agent then notify customer then notify manager then resolve ticket then close case"),
+("T03", "When fraud detected lock account then flag for review then notify manager then create audit record then generate report"),
+("T04", "When patient admitted schedule appointment then alert care team then notify manager then create audit record"),
+("T05", "When critical vitals detected alert care team then escalate to specialist then notify manager then create audit record"),
+
+
 ]
 
 # shared instances

@@ -61,7 +61,7 @@ class NLPWorkflowService:
     # ------------------------------------------------------------------ #
 
     def generate(self, user_request: str) -> dict:
-        catalog_result = self.catalog_matcher.match(user_request)
+        catalog_result = self.catalog_matcher.match(self._db,user_request)
         workflow_type = catalog_result.workflow_type
 
         suitability = self.suitability_agent.evaluate(

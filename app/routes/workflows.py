@@ -51,3 +51,76 @@ def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return result
+
+
+# ── Sub-resource endpoints for frontend workflow details page ──────────────────
+
+@router.get("/{workflow_id}/dsl")
+def get_workflow_dsl(workflow_id: int, db: Session = Depends(get_db)):
+    """Return the DSL string from the compiled workflow stored in parsed_rule_json."""
+    workflow = workflow_repo.get_by_id(db, workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    parsed = workflow.parsed_rule_json or {}
+    steps = parsed.get("steps", [])
+    trigger = parsed.get("trigger", {})
+    trigger_event = trigger.get("event_type", "unknown")
+
+    # Rebuild DSL string from steps
+    lines = []
+    for step in steps:
+        step_id = step.get("id", "?")
+        action = step.get("action", "unknown")
+        deps = step.get("depends_on", [])
+        if deps:
+            dep_str = ",".join(f"@{d}" for d in deps)
+            lines.append(f"@{step_id} @depends({dep_str}): {trigger_event} -> {action}")
+        else:
+            lines.append(f"@{step_id}: {trigger_event} -> {action}")
+
+    return {
+        "dsl": "\n".join(lines),
+        "workflow_id": workflow_id,
+        "raw_input": workflow.raw_input,
+    }
+
+
+@router.get("/{workflow_id}/ast")
+def get_workflow_ast(workflow_id: int, db: Session = Depends(get_db)):
+    """Return AST-like representation built from parsed_rule_json."""
+    workflow = workflow_repo.get_by_id(db, workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    parsed = workflow.parsed_rule_json or {}
+    steps = parsed.get("steps", [])
+    trigger = parsed.get("trigger", {})
+
+    nodes = [{"id": "trigger", "type": "trigger", "name": trigger.get("event_type", "unknown"), "config": {}}]
+    edges = []
+
+    for step in steps:
+        step_id = str(step.get("id", ""))
+        nodes.append({
+            "id": step_id,
+            "type": "action",
+            "name": step.get("action", ""),
+            "config": step.get("config", {}),
+        })
+        deps = step.get("depends_on", [])
+        if not deps:
+            edges.append({"source": "trigger", "target": step_id})
+        for dep in deps:
+            edges.append({"source": str(dep), "target": step_id})
+
+    return {"type": "workflow_ast", "nodes": nodes, "edges": edges}
+
+
+@router.get("/{workflow_id}/compiled")
+def get_workflow_compiled(workflow_id: int, db: Session = Depends(get_db)):
+    """Return the full parsed_rule_json (compiled DAG) as stored in DB."""
+    workflow = workflow_repo.get_by_id(db, workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return workflow.parsed_rule_json or {}

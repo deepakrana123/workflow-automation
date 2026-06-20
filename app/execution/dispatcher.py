@@ -125,7 +125,15 @@ def execute_action(action_name: str, payload: dict, config: dict) -> dict:
                 "available_actions": sorted(ACTION_MAP.keys()),
             }},
         )
-        return {"status": "failed", "action": action_name, "reason": "unknown action"}
+        # Return explicit failure — step_executor will mark FAILED and go to DLQ
+        # Do NOT retry unknown actions — they will never succeed
+        return {
+            "success": False,
+            "status": "failed",
+            "action": action_name,
+            "reason": "unknown_action",
+            "skip_retry": True,
+        }
 
     logger.info(
         "action_dispatched",
