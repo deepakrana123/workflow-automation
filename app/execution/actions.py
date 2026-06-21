@@ -40,6 +40,14 @@ def notify_manager(payload, config):
     return {"success": True, "status": "success", "notified": True, "channel": channel}
 
 
+def notify_customer(payload, config):
+    channel = config.get("channel", "email")
+    logger.info("action_notify_customer_success", extra={"extra_data": {
+        "payload": payload, "channel": channel,
+    }})
+    return {"success": True, "status": "success", "notified": True, "channel": channel}
+
+
 def close_case(payload, config):
     reason = config.get("reason", "resolved")
     logger.info("action_close_case_success", extra={"extra_data": {

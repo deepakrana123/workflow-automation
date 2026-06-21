@@ -4,16 +4,15 @@ from app.execution.state_manager import mark_retry_scheduled, mark_dlq
 from app.core.logger import logger
 
 
-def handle_retry(db, step_execution, error, workflow_execution=None):
+def handle_retry(db, step_execution, error, workflow_execution=None, skip_retry: bool = False):
     """
     Decide retry vs DLQ for a failed step.
-    Emits RETRY_SCHEDULED trace event if workflow_execution is provided.
-
-    Returns dict with retry_scheduled, moved_to_dlq, attempts.
+    skip_retry=True forces immediate DLQ — used for unrecoverable errors
+    like unknown_action where retrying will never succeed.
     """
     attempts = (step_execution.attempts or 0) + 1
 
-    if should_retry(attempts):
+    if not skip_retry and should_retry(attempts):
         retry_result = handle_retry_event(
             step_execution=step_execution,
             attempts=attempts,
