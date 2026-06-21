@@ -1,20 +1,4 @@
-"""
-scripts/test_semantic_e2e.py
 
-Full end-to-end test using SEMANTIC inputs only.
-All queries use synonyms/paraphrases — keyword matching would fail these.
-Pipeline: semantic search → catalog → LLM → compile → save → execute → COMPLETED
-
-Requirements:
-    docker-compose up   (all services including worker)
-    backfill_embeddings must have been run
-
-Run:
-    .venv\\Scripts\\python.exe scripts/test_semantic_e2e.py
-    .venv\\Scripts\\python.exe scripts/test_semantic_e2e.py --id S01
-    .venv\\Scripts\\python.exe scripts/test_semantic_e2e.py --domain finance
-    .venv\\Scripts\\python.exe scripts/test_semantic_e2e.py --stop-on-fail
-"""
 
 import sys
 import time
@@ -59,113 +43,220 @@ class SemanticE2ECase:
 
 
 CASES = [
-    # ── Finance (5 cases) ─────────────────────────────────────────────────────
-    SemanticE2ECase(
-        "S01", "finance",
-        "invoice unpaid → alert supervisor + freeze account",
-        "invoice still unpaid alert supervisor and freeze the account",
-    ),
-    SemanticE2ECase(
-        "S02", "finance",
-        "suspicious activity → mark for investigation + log compliance record",
-        "suspicious account activity mark for investigation and log compliance record",
-    ),
-    SemanticE2ECase(
-        "S03", "finance",
-        "bill past due → remind customer then escalate to higher authority",
-        "bill is past due remind customer then escalate to higher authority",
-    ),
-    SemanticE2ECase(
-        "S04", "finance",
-        "fraudulent transaction → freeze account then create audit trail then alert supervisor",
-        "fraudulent transaction detected freeze the account then create audit trail then alert supervisor",
-    ),
-    SemanticE2ECase(
-        "S05", "finance",
-        "account suspended → restore access + notify manager",
-        "user account suspended restore account access and tell the manager",
-    ),
+    # # ── Finance (5 cases) ─────────────────────────────────────────────────────
+    # SemanticE2ECase(
+    #     "S01", "finance",
+    #     "invoice unpaid → alert supervisor + freeze account",
+    #     "invoice still unpaid alert supervisor and freeze the account",
+    # ),
+    # SemanticE2ECase(
+    #     "S02", "finance",
+    #     "suspicious activity → mark for investigation + log compliance record",
+    #     "suspicious account activity mark for investigation and log compliance record",
+    # ),
+    # SemanticE2ECase(
+    #     "S03", "finance",
+    #     "bill past due → remind customer then escalate to higher authority",
+    #     "bill is past due remind customer then escalate to higher authority",
+    # ),
+    # SemanticE2ECase(
+    #     "S04", "finance",
+    #     "fraudulent transaction → freeze account then create audit trail then alert supervisor",
+    #     "fraudulent transaction detected freeze the account then create audit trail then alert supervisor",
+    # ),
+    # SemanticE2ECase(
+    #     "S05", "finance",
+    #     "account suspended → restore access + notify manager",
+    #     "user account suspended restore account access and tell the manager",
+    # ),
 
-    # ── Support (5 cases) ─────────────────────────────────────────────────────
-    SemanticE2ECase(
-        "S06", "support",
-        "new issue opened → route to agent then inform customer",
-        "new issue was opened route ticket to an agent then inform customer about update",
-    ),
-    SemanticE2ECase(
-        "S07", "support",
-        "response time exceeded → push to tier two + alert supervisor",
-        "response time exceeded push to tier two team and alert supervisor about this",
-    ),
-    SemanticE2ECase(
-        "S08", "support",
-        "customer cancelled subscription → send satisfaction form + notify manager",
-        "customer cancelled subscription send customer satisfaction form and tell the manager",
-    ),
-    SemanticE2ECase(
-        "S09", "support",
-        "customer wants money back → initiate money return then mark ticket as done",
-        "customer wants money back initiate money return then mark ticket as done",
-    ),
-    SemanticE2ECase(
-        "S10", "support",
-        "complaint filed → assign employee then fix the issue then send update",
-        "complaint filed by customer assign employee to ticket then fix the support issue then inform customer about update",
-    ),
+    # # ── Support (5 cases) ─────────────────────────────────────────────────────
+    # SemanticE2ECase(
+    #     "S06", "support",
+    #     "new issue opened → route to agent then inform customer",
+    #     "new issue was opened route ticket to an agent then inform customer about update",
+    # ),
+    # SemanticE2ECase(
+    #     "S07", "support",
+    #     "response time exceeded → push to tier two + alert supervisor",
+    #     "response time exceeded push to tier two team and alert supervisor about this",
+    # ),
+    # SemanticE2ECase(
+    #     "S08", "support",
+    #     "customer cancelled subscription → send satisfaction form + notify manager",
+    #     "customer cancelled subscription send customer satisfaction form and tell the manager",
+    # ),
+    # SemanticE2ECase(
+    #     "S09", "support",
+    #     "customer wants money back → initiate money return then mark ticket as done",
+    #     "customer wants money back initiate money return then mark ticket as done",
+    # ),
+    # SemanticE2ECase(
+    #     "S10", "support",
+    #     "complaint filed → assign employee then fix the issue then send update",
+    #     "complaint filed by customer assign employee to ticket then fix the support issue then inform customer about update",
+    # ),
 
-    # ── Health (5 cases) ──────────────────────────────────────────────────────
-    SemanticE2ECase(
-        "S11", "health",
-        "patient checked into hospital → book appointment + notify manager",
-        "patient checked into hospital book appointment for patient and notify manager",
-    ),
-    SemanticE2ECase(
-        "S12", "health",
-        "vital signs critical → alert medical team then refer to specialist",
-        "vital signs critical alert the medical team then refer patient to specialist",
-    ),
-    SemanticE2ECase(
-        "S13", "health",
-        "prescription overdue → send pill reminder then check in on wellness",
-        "prescription overdue send pill reminder to patient then check in on patient wellness",
-    ),
-    SemanticE2ECase(
-        "S14", "health",
-        "patient left hospital → send home care instructions + log compliance record",
-        "patient left the hospital send home care instructions and log compliance record",
-    ),
-    SemanticE2ECase(
-        "S15", "health",
-        "patient condition deteriorated → activate emergency response then notify medical team",
-        "patient condition deteriorated activate emergency response then notify care staff immediately",
-    ),
+    # # ── Health (5 cases) ──────────────────────────────────────────────────────
+    # SemanticE2ECase(
+    #     "S11", "health",
+    #     "patient checked into hospital → book appointment + notify manager",
+    #     "patient checked into hospital book appointment for patient and notify manager",
+    # ),
+    # SemanticE2ECase(
+    #     "S12", "health",
+    #     "vital signs critical → alert medical team then refer to specialist",
+    #     "vital signs critical alert the medical team then refer patient to specialist",
+    # ),
+    # SemanticE2ECase(
+    #     "S13", "health",
+    #     "prescription overdue → send pill reminder then check in on wellness",
+    #     "prescription overdue send pill reminder to patient then check in on patient wellness",
+    # ),
+    # SemanticE2ECase(
+    #     "S14", "health",
+    #     "patient left hospital → send home care instructions + log compliance record",
+    #     "patient left the hospital send home care instructions and log compliance record",
+    # ),
+    # SemanticE2ECase(
+    #     "S15", "health",
+    #     "patient condition deteriorated → activate emergency response then notify medical team",
+    #     "patient condition deteriorated activate emergency response then notify care staff immediately",
+    # ),
 
-    # ── Mixed hard cases (5 cases) ────────────────────────────────────────────
-    SemanticE2ECase(
-        "S16", "finance",
-        "emi overdue → warn customer then raise case + log compliance",
-        "emi is overdue send payment warning to customer then raise the case to higher level and log compliance record",
-    ),
-    SemanticE2ECase(
-        "S17", "support",
-        "grievance raised → route to agent + move to second level + send satisfaction form",
-        "customer raised a grievance route ticket to an agent then move to second level support then send customer satisfaction form",
-    ),
-    SemanticE2ECase(
-        "S18", "health",
-        "test results available → notify about result then book follow up",
-        "test results are available notify about test result then book appointment for patient",
-    ),
-    SemanticE2ECase(
-        "S19", "finance",
-        "credit request → tag as suspicious + alert supervisor + log audit",
-        "credit request received tag as suspicious and alert supervisor about this then create audit trail",
-    ),
-    SemanticE2ECase(
-        "S20", "support",
-        "ticket not closed → move to tier2 + inform customer + mark done",
-        "issue still pending move to second level support and inform customer about update then mark ticket as done",
-    ),
+    # # ── Mixed hard cases (5 cases) ────────────────────────────────────────────
+    # SemanticE2ECase(
+    #     "S16", "finance",
+    #     "emi overdue → warn customer then raise case + log compliance",
+    #     "emi is overdue send payment warning to customer then raise the case to higher level and log compliance record",
+    # ),
+    # SemanticE2ECase(
+    #     "S17", "support",
+    #     "grievance raised → route to agent + move to second level + send satisfaction form",
+    #     "customer raised a grievance route ticket to an agent then move to second level support then send customer satisfaction form",
+    # ),
+    # SemanticE2ECase(
+    #     "S18", "health",
+    #     "test results available → notify about result then book follow up",
+    #     "test results are available notify about test result then book appointment for patient",
+    # ),
+    # SemanticE2ECase(
+    #     "S19", "finance",
+    #     "credit request → tag as suspicious + alert supervisor + log audit",
+    #     "credit request received tag as suspicious and alert supervisor about this then create audit trail",
+    # ),
+    # SemanticE2ECase(
+    #     "S20", "support",
+    #     "ticket not closed → move to tier2 + inform customer + mark done",
+    #     "issue still pending move to second level support and inform customer about update then mark ticket as done",
+    # ),
+    # ── Finance (5 new cases) ─────────────────────────────────────────────────────
+SemanticE2ECase(
+    "S21", "finance",
+    "new loan application → verify documents then assign relationship manager",
+    "new loan application received verify customer documents then assign relationship manager",
+),
+SemanticE2ECase(
+    "S22", "finance",
+    "credit score dropped → notify customer then adjust credit limit",
+    "customer credit score dropped significantly notify customer about change then adjust credit limit accordingly",
+),
+SemanticE2ECase(
+    "S23", "finance",
+    "overdraft fee charged → send notification then offer overdraft protection",
+    "overdraft fee applied to account notify customer about fee then offer overdraft protection plan",
+),
+SemanticE2ECase(
+    "S24", "finance",
+    "bank account opened → send welcome email then activate online banking",
+    "new bank account opened send welcome email to customer then activate online banking access",
+),
+SemanticE2ECase(
+    "S25", "finance",
+    "large withdrawal detected → verify with customer then flag for review",
+    "large withdrawal amount detected verify transaction with customer then flag account for manual review",
+),
+
+# ── Support (5 new cases) ─────────────────────────────────────────────────────
+SemanticE2ECase(
+    "S26", "support",
+    "system outage detected → notify all users then deploy fix",
+    "system outage detected notify all affected users immediately then deploy hotfix to resolve issue",
+),
+SemanticE2ECase(
+    "S27", "support",
+    "feature request submitted → evaluate feasibility then inform development team",
+    "new feature request submitted by customer evaluate feasibility of request then inform development team about it",
+),
+SemanticE2ECase(
+    "S28", "support",
+    "bug reported by customer → reproduce issue then escalate to engineering",
+    "customer reported a critical bug try to reproduce issue then escalate to engineering team for resolution",
+),
+SemanticE2ECase(
+    "S29", "support",
+    "account locked due to multiple failures → unlock account then ask for password reset",
+    "user account locked due to multiple login failures unlock account then request password reset for security",
+),
+SemanticE2ECase(
+    "S30", "support",
+    "delivery delay complaint → update tracking then provide compensation",
+    "customer complained about delivery delay update tracking information then offer compensation for inconvenience",
+),
+
+# ── Health (5 new cases) ──────────────────────────────────────────────────────
+SemanticE2ECase(
+    "S31", "health",
+    "appointment no-show → log in system then send reminder for reschedule",
+    "patient did not show for appointment log no-show in system then send reminder to reschedule appointment",
+),
+SemanticE2ECase(
+    "S32", "health",
+    "vaccination due → send reminder to patient then update immunization record",
+    "vaccination is due for patient send reminder notification then update immunization record in system",
+),
+SemanticE2ECase(
+    "S33", "health",
+    "lab results abnormal → alert primary care physician then schedule consultation",
+    "lab test results are abnormal immediately alert primary care physician then schedule consultation appointment",
+),
+SemanticE2ECase(
+    "S34", "health",
+    "sleep study referral → process referral then send to specialist",
+    "patient requires sleep study referral process referral request then send to sleep specialist for review",
+),
+SemanticE2ECase(
+    "S35", "health",
+    "mental health screening positive → initiate care plan then assign counselor",
+    "mental health screening came back positive initiate care plan for patient then assign counselor for follow-up",
+),
+
+# ── Mixed complex cases (5 new cases) ────────────────────────────────────────
+SemanticE2ECase(
+    "S36", "finance",
+    "joint account dispute → freeze account then investigate then inform both parties",
+    "dispute on joint account freeze account immediately then launch investigation then inform both account holders of outcome",
+),
+SemanticE2ECase(
+    "S37", "support",
+    "escalated complaint unresolved → notify senior manager then arrange callback",
+    "escalated complaint remains unresolved notify senior manager about issue then arrange callback to customer",
+),
+SemanticE2ECase(
+    "S38", "health",
+    "emergency contact out-of-date → update records then confirm with patient",
+    "emergency contact information is outdated update patient records then confirm updated details with patient",
+),
+SemanticE2ECase(
+    "S39", "finance",
+    "investment portfolio rebalance → analyze market then execute trades then notify client",
+    "investment portfolio needs rebalancing analyze market conditions then execute trades then notify client of changes",
+),
+SemanticE2ECase(
+    "S40", "support",
+    "data privacy request received → verify identity then process request then confirm completion",
+    "data privacy request received from customer verify customer identity then process data request then confirm completion to customer",
+),
 ]
 
 

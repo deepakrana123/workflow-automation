@@ -84,9 +84,6 @@ _PRODUCTION_ACTION_MAP = {
 }
 
 
-# ── CHAOS ACTION MAP ──────────────────────────────────────────────────────────
-# All domain actions share the same chaos engine — _apply_chaos reads chaos_mode
-# from config so any action can be put into any failure mode without extra code
 
 def _make_chaos_action(action_name: str):
     """Factory — wraps any action name with the chaos engine."""

@@ -1,27 +1,4 @@
-"""
-Chaos Actions — Fake third-party integration for real-world failure testing.
 
-Every action here simulates a real external API call with configurable failure modes.
-Use these in your DAG workflows during testing to verify:
-    - retry logic
-    - DLQ behavior
-    - timeout handling
-    - payload validation
-    - gateway errors
-    - rate limiting
-    - partial success
-    - flaky services
-
-Configure via `config` dict passed to each action:
-    {
-        "chaos_mode": "timeout" | "gateway_error" | "rate_limit" | "bad_payload"
-                    | "flaky" | "always_fail" | "partial_success" | "slow"
-                    | "payload_overload" | "auth_error" | "success",
-        "fail_rate": 0.0 - 1.0,   # for "flaky" mode
-        "delay_seconds": int,       # for "slow" / "timeout" mode
-        "fail_on_attempt": int,     # fail only on this attempt number
-    }
-"""
 
 import time
 import random
