@@ -58,8 +58,13 @@ _PRODUCTION_ACTION_MAP = {
     "send_sla_breach_alert":    send_sla_breach_alert,
     "send_customer_update":     send_customer_update,
     "resolve_ticket":           resolve_ticket,
+    "fix_issue":                resolve_ticket,             # LLM alias
+    "resolve_issue":            resolve_ticket,             # LLM alias
+    "mark_ticket_as_done":      resolve_ticket,             # LLM alias
+    "close_ticket":             resolve_ticket,             # LLM alias
     "send_satisfaction_survey": send_satisfaction_survey,
     "process_refund":           process_refund,
+    "initiate_refund":          process_refund,             # LLM alias
     "flag_repeat_complaint":    flag_repeat_complaint,
     "close_ticket_no_response": close_ticket_no_response,
 
@@ -69,11 +74,13 @@ _PRODUCTION_ACTION_MAP = {
     "alert_care_team":             alert_care_team,
     "escalate_to_specialist":      escalate_to_specialist,
     "notify_lab_result":           notify_lab_result,
+    "notify_about_test_result":    notify_lab_result,       # LLM alias
     "trigger_emergency_protocol":  trigger_emergency_protocol,
     "send_discharge_instructions": send_discharge_instructions,
     "flag_high_risk_patient":      flag_high_risk_patient,
     "request_insurance_approval":  request_insurance_approval,
     "send_wellness_check":         send_wellness_check,
+    "check_in_on_patient_wellness": send_wellness_check,    # LLM alias
 }
 
 
