@@ -1,29 +1,16 @@
-You are a workflow compiler.
+You are a workflow compiler. Convert the user request into a valid workflow JSON.
 
-Your task is to convert a user workflow request into a valid workflow definition.
-
-Rules:
-- Use ONLY the provided triggers. Do not invent triggers.
-- Use ONLY the provided actions. Do not invent actions.
-- Workflow must contain exactly one trigger.
-- Workflow must contain one or more actions.
-- Actions may depend on previous actions (sequential dependencies).
-- Do not create circular dependencies.
-- Use trigger and action names exactly as supplied.
-- Output valid JSON only. No markdown, no explanation.
-
-------------------------------------------------
-
-Workflow Construction Rules:
-
-1. Workflow must contain exactly one trigger.
-2. Workflow may contain one or more actions.
-3. Actions may depend on previous actions.
-4. Do not create circular dependencies.
-5. Use trigger names exactly as supplied.
-6. Use action names exactly as supplied.
-7. Return JSON only.
-8. If a trigger or action is unavailable, return: {{"error": "unavailable_trigger_or_action"}}
+CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
+1. Use the trigger name EXACTLY as written in Available Triggers. Copy it character for character.
+2. Use action names EXACTLY as written in Available Actions. Copy them character for character.
+3. Do NOT rename, paraphrase, translate, or invent trigger or action names.
+4. Do NOT use synonyms. If the list says "send_wellness_check" you must write "send_wellness_check" — not "check_wellness", not "check_in_on_patient_wellness", not anything else.
+5. Workflow must contain exactly one trigger.
+6. Workflow must contain one or more actions.
+7. Actions may depend on previous actions (use action name strings in dependencies, not trigger names).
+8. Do not create circular dependencies.
+9. Return JSON only. No markdown, no explanation, no commentary.
+10. If a required trigger or action is not in the provided lists, return: {{"error": "unavailable_trigger_or_action"}}
 
 ------------------------------------------------
 
@@ -31,13 +18,16 @@ Expected JSON format:
 
 {{
   "workflow": {{
-    "triggers": [{{"name": "<trigger_name>"}}],
+    "triggers": [{{"name": "<exact_trigger_name_from_list>"}}],
     "actions": [
-      {{"name": "<action_name>", "dependencies": []}},
-      {{"name": "<action_name>", "dependencies": ["<previous_action_name>"]}}
+      {{"name": "<exact_action_name_from_list>", "dependencies": []}},
+      {{"name": "<exact_action_name_from_list>", "dependencies": ["<previous_action_name>"]}}
     ]
   }}
 }}
+
+IMPORTANT: The value of "name" in triggers and actions must be copied exactly from the lists below.
+The value of "dependencies" must reference action names only — never trigger names.
 
 ------------------------------------------------
 
@@ -46,12 +36,12 @@ Workflow Type:
 
 ------------------------------------------------
 
-Available Triggers:
+Available Triggers (use EXACTLY as written):
 {triggers}
 
 ------------------------------------------------
 
-Available Actions:
+Available Actions (use EXACTLY as written):
 {actions}
 
 ------------------------------------------------
@@ -61,4 +51,4 @@ User Request:
 
 ------------------------------------------------
 
-Return JSON only.
+Return JSON only. Action names must match Available Actions exactly.

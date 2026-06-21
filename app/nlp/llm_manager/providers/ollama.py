@@ -6,7 +6,7 @@ from app.core.logger import logger
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1sss"))
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1"))
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 

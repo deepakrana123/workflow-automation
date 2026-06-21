@@ -6,6 +6,12 @@ from app.execution.actions import (
     create_audit_record, trigger_webhook, update_entity_status,
     flag_for_review, lock_account, unlock_account, generate_report,
     fail_randomly,
+    # Finance domain
+    approve_invoice, apply_credit, calculate_tax, create_payment,
+    generate_financial_report, notify_payment_failure, process_credit_check,
+    reconcile_account, send_audit_report, send_invoice,
+    send_payment_confirmation, update_payment_method,
+    validate_transaction, verify_compliance,
 )
 from app.execution.domain_actions.support_actions import (
     create_support_ticket, assign_support_agent, escalate_to_tier2,
@@ -28,9 +34,11 @@ from app.core.logger import logger
 
 
 # ── PRODUCTION ACTION MAP ─────────────────────────────────────────────────────
+# Keys = exact action names the LLM must use (enforced by prompt).
+# This is the canonical registry — one entry per real function.
 
 _PRODUCTION_ACTION_MAP = {
-    # Generic
+    # Generic / Finance
     "send_reminder":           send_reminder,
     "escalate_case":           escalate_case,
     "assign_senior_officer":   assign_senior_officer,
@@ -51,6 +59,22 @@ _PRODUCTION_ACTION_MAP = {
     "generate_report":         generate_report,
     "fail_randomly":           fail_randomly,
 
+    # Finance domain
+    "approve_invoice":             approve_invoice,
+    "apply_credit":                apply_credit,
+    "calculate_tax":               calculate_tax,
+    "create_payment":              create_payment,
+    "generate_financial_report":   generate_financial_report,
+    "notify_payment_failure":      notify_payment_failure,
+    "process_credit_check":        process_credit_check,
+    "reconcile_account":           reconcile_account,
+    "send_audit_report":           send_audit_report,
+    "send_invoice":                send_invoice,
+    "send_payment_confirmation":   send_payment_confirmation,
+    "update_payment_method":       update_payment_method,
+    "validate_transaction":        validate_transaction,
+    "verify_compliance":           verify_compliance,
+
     # Support domain
     "create_support_ticket":    create_support_ticket,
     "assign_support_agent":     assign_support_agent,
@@ -58,13 +82,8 @@ _PRODUCTION_ACTION_MAP = {
     "send_sla_breach_alert":    send_sla_breach_alert,
     "send_customer_update":     send_customer_update,
     "resolve_ticket":           resolve_ticket,
-    "fix_issue":                resolve_ticket,             # LLM alias
-    "resolve_issue":            resolve_ticket,             # LLM alias
-    "mark_ticket_as_done":      resolve_ticket,             # LLM alias
-    "close_ticket":             resolve_ticket,             # LLM alias
     "send_satisfaction_survey": send_satisfaction_survey,
     "process_refund":           process_refund,
-    "initiate_refund":          process_refund,             # LLM alias
     "flag_repeat_complaint":    flag_repeat_complaint,
     "close_ticket_no_response": close_ticket_no_response,
 
@@ -74,14 +93,39 @@ _PRODUCTION_ACTION_MAP = {
     "alert_care_team":             alert_care_team,
     "escalate_to_specialist":      escalate_to_specialist,
     "notify_lab_result":           notify_lab_result,
-    "notify_about_test_result":    notify_lab_result,       # LLM alias
     "trigger_emergency_protocol":  trigger_emergency_protocol,
     "send_discharge_instructions": send_discharge_instructions,
     "flag_high_risk_patient":      flag_high_risk_patient,
     "request_insurance_approval":  request_insurance_approval,
     "send_wellness_check":         send_wellness_check,
-    "check_in_on_patient_wellness": send_wellness_check,    # LLM alias
 }
+
+
+def _resolve_handler_from_db(action_name: str):
+    """
+    DB fallback — looks up action by name in action_definitions.
+    If the row has a handler_name, resolve that to a function in _PRODUCTION_ACTION_MAP.
+    This allows DB aliases to map to canonical handlers without code changes.
+    """
+    try:
+        from app.db.session import SessionLocal
+        from app.models.action_definitions import ActionDefinition
+        db = SessionLocal()
+        try:
+            row = db.query(ActionDefinition).filter(
+                ActionDefinition.name == action_name,
+                ActionDefinition.active == True,
+            ).first()
+            if row and row.handler_name:
+                return _PRODUCTION_ACTION_MAP.get(row.handler_name)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(
+            "dispatcher_db_fallback_failed",
+            extra={"extra_data": {"action_name": action_name, "error": str(e)}},
+        )
+    return None
 
 
 
@@ -120,6 +164,15 @@ ACTION_MAP = _CHAOS_ACTION_MAP if _CHAOS_ENABLED else _PRODUCTION_ACTION_MAP
 def execute_action(action_name: str, payload: dict, config: dict) -> dict:
     handler = ACTION_MAP.get(action_name)
 
+    # DB fallback — resolve via handler_name column in action_definitions
+    if not handler:
+        handler = _resolve_handler_from_db(action_name)
+        if handler:
+            logger.info(
+                "action_resolved_via_db",
+                extra={"extra_data": {"action_name": action_name}},
+            )
+
     if not handler:
         logger.error(
             "action_unknown",
@@ -129,8 +182,6 @@ def execute_action(action_name: str, payload: dict, config: dict) -> dict:
                 "available_actions": sorted(ACTION_MAP.keys()),
             }},
         )
-        # Return explicit failure — step_executor will mark FAILED and go to DLQ
-        # Do NOT retry unknown actions — they will never succeed
         return {
             "success": False,
             "status": "failed",

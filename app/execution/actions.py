@@ -170,3 +170,138 @@ def generate_report(payload, config):
         "report_type": report_type,
         "report_id": f"RPT-{int(time.time())}",
     }
+
+
+# ── Finance domain actions ────────────────────────────────────────────────────
+
+def approve_invoice(payload, config):
+    """Approve, authorize, or validate an invoice for payment processing."""
+    invoice_id = config.get("invoice_id", payload.get("entity_id", "unknown"))
+    logger.info("action_approve_invoice_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "invoice_id": invoice_id,
+    }})
+    return {"success": True, "status": "success", "invoice_id": invoice_id, "approved": True}
+
+
+def apply_credit(payload, config):
+    """Apply credits, discounts, or adjustments to a customer account."""
+    amount = config.get("credit_amount", 0)
+    logger.info("action_apply_credit_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "amount": amount,
+    }})
+    return {"success": True, "status": "success", "credit_applied": True, "amount": amount}
+
+
+def calculate_tax(payload, config):
+    """Calculate tax, VAT, GST, or other tax liabilities for a transaction."""
+    tax_type = config.get("tax_type", "standard")
+    logger.info("action_calculate_tax_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "tax_type": tax_type,
+    }})
+    return {"success": True, "status": "success", "tax_calculated": True, "tax_type": tax_type}
+
+
+def create_payment(payload, config):
+    """Create, initiate, or execute a payment to a vendor, supplier, or customer."""
+    amount = config.get("amount", 0)
+    logger.info("action_create_payment_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "amount": amount,
+    }})
+    return {
+        "success": True, "status": "success",
+        "payment_id": f"PAY-{int(time.time())}",
+        "amount": amount,
+    }
+
+
+def generate_financial_report(payload, config):
+    """Generate a financial report, statement, or summary."""
+    report_type = config.get("report_type", "financial_summary")
+    logger.info("action_generate_financial_report_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "report_type": report_type,
+    }})
+    return {
+        "success": True, "status": "success",
+        "report_id": f"FIN-RPT-{int(time.time())}",
+        "report_type": report_type,
+    }
+
+
+def notify_payment_failure(payload, config):
+    """Notify customer or finance team about a failed or declined payment."""
+    channel = config.get("channel", "email")
+    logger.warning("action_notify_payment_failure_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "channel": channel,
+    }})
+    return {"success": True, "status": "success", "notified": True, "channel": channel}
+
+
+def process_credit_check(payload, config):
+    """Perform a credit check or creditworthiness assessment."""
+    logger.info("action_process_credit_check_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"),
+    }})
+    return {"success": True, "status": "success", "credit_check_completed": True}
+
+
+def reconcile_account(payload, config):
+    """Reconcile account transactions, match payments to invoices."""
+    logger.info("action_reconcile_account_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"),
+    }})
+    return {"success": True, "status": "success", "reconciled": True}
+
+
+def send_audit_report(payload, config):
+    """Send an audit report or compliance summary to stakeholders."""
+    channel = config.get("channel", "email")
+    logger.info("action_send_audit_report_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "channel": channel,
+    }})
+    return {"success": True, "status": "success", "report_sent": True, "channel": channel}
+
+
+def send_invoice(payload, config):
+    """Send, issue, or deliver an invoice to a customer or vendor."""
+    channel = config.get("channel", "email")
+    logger.info("action_send_invoice_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "channel": channel,
+    }})
+    return {
+        "success": True, "status": "success",
+        "invoice_id": f"INV-{int(time.time())}",
+        "channel": channel,
+    }
+
+
+def send_payment_confirmation(payload, config):
+    """Send payment confirmation, receipt, or acknowledgment."""
+    channel = config.get("channel", "email")
+    logger.info("action_send_payment_confirmation_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"), "channel": channel,
+    }})
+    return {"success": True, "status": "success", "confirmation_sent": True, "channel": channel}
+
+
+def update_payment_method(payload, config):
+    """Update, add, or modify a customer payment method."""
+    logger.info("action_update_payment_method_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"),
+    }})
+    return {"success": True, "status": "success", "payment_method_updated": True}
+
+
+def validate_transaction(payload, config):
+    """Validate, verify, or authenticate a financial transaction."""
+    logger.info("action_validate_transaction_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"),
+    }})
+    return {"success": True, "status": "success", "transaction_validated": True}
+
+
+def verify_compliance(payload, config):
+    """Verify compliance with regulations, KYC, AML, or other requirements."""
+    logger.info("action_verify_compliance_success", extra={"extra_data": {
+        "entity_id": payload.get("entity_id"),
+    }})
+    return {"success": True, "status": "success", "compliance_verified": True}
