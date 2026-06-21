@@ -109,6 +109,7 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
         checkpoint = _CP_DISPATCH
         result  = execute_action(action_name=action, payload=traced_payload, config=config)
         success = result.get("success") is True or result.get("status") == "success"
+        skip_retry = result.get("skip_retry", False)
 
         if success:
             # ── CHECKPOINT: mark_step_completed ──────────────────────────────
@@ -180,6 +181,7 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
             step_execution=step_execution,
             error=str(result),
             workflow_execution=workflow_execution,
+            skip_retry=skip_retry,
         )
 
         record_retry_history(
