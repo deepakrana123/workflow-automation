@@ -40,6 +40,10 @@ jobs:
           python -c "import app.workers.retry_worker"
           python -c "import app.workers.reaper_worker"
           python -c "import app.workflow.workflow_compiler_service"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_HOST: ${{secrets.REDIS_HOST}}
+          GEMINI_API_KEY: ${{secrets.GEMINI_API_KEY}}
 
       - name: Build Docker Image
         run: |
