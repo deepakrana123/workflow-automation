@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -15,17 +16,29 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.analytics import router as analytics_router
 from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
+from app.core import startup as startup_module
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ───────────────────────────────────────────────────────────────
+    results = startup_module.run_startup_checks()
+    startup_module._startup_results = results
+    yield
+    # ── Shutdown (nothing needed) ─────────────────────────────────────────────
+
 
 app = FastAPI(
     title="MFlows AI",
     version="2.0.0",
     description="AI workflow automation engine — natural language to executable DAG",
+    lifespan=lifespan,
 )
 
-# CORS — allow the Vite dev server to call the API
+# CORS — allow the Vite dev server and deployed frontend to call the API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,5 +58,5 @@ app.include_router(settings_router, prefix="/api")
 
 
 @app.get("/")
-def health():
+def root():
     return {"status": "ok", "service": "mflows"}

@@ -305,3 +305,233 @@ def verify_compliance(payload, config):
         "entity_id": payload.get("entity_id"),
     }})
     return {"success": True, "status": "success", "compliance_verified": True}
+
+
+# ── Banking and Loan Management Actions ──────────────────────────────────────
+
+def assess_creditworthiness(payload, config):
+    logger.info("action_assess_creditworthiness", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "creditworthy": True, "score": 750}
+
+def approve_loan(payload, config):
+    logger.info("action_approve_loan", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "loan_approved": True}
+
+def reject_loan_application(payload, config):
+    reason = config.get("reason", "eligibility_failed")
+    logger.info("action_reject_loan_application", extra={"extra_data": {"entity_id": payload.get("entity_id"), "reason": reason}})
+    return {"success": True, "status": "success", "loan_rejected": True, "reason": reason}
+
+def disburse_loan(payload, config):
+    amount = config.get("amount", 0)
+    logger.info("action_disburse_loan", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "disbursed": True, "amount": amount, "reference": f"DISB-{int(__import__('time').time())}"}
+
+def generate_loan_agreement(payload, config):
+    logger.info("action_generate_loan_agreement", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "agreement_id": f"AGR-{int(__import__('time').time())}"}
+
+def calculate_emi(payload, config):
+    principal = config.get("principal", 0)
+    logger.info("action_calculate_emi", extra={"extra_data": {"entity_id": payload.get("entity_id"), "principal": principal}})
+    return {"success": True, "status": "success", "emi_calculated": True}
+
+def send_loan_offer(payload, config):
+    logger.info("action_send_loan_offer", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "offer_sent": True}
+
+def collect_documents(payload, config):
+    logger.info("action_collect_documents", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "documents_requested": True}
+
+def initiate_kyc(payload, config):
+    logger.info("action_initiate_kyc", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "kyc_initiated": True}
+
+def complete_kyc(payload, config):
+    logger.info("action_complete_kyc", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "kyc_completed": True}
+
+def send_kyc_reminder(payload, config):
+    logger.info("action_send_kyc_reminder", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "kyc_reminder_sent": True}
+
+def aml_screening(payload, config):
+    logger.info("action_aml_screening", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "aml_cleared": True}
+
+def sanctions_check(payload, config):
+    logger.info("action_sanctions_check", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "sanctions_cleared": True}
+
+def submit_regulatory_report(payload, config):
+    regulator = config.get("regulator", "RBI")
+    logger.info("action_submit_regulatory_report", extra={"extra_data": {"entity_id": payload.get("entity_id"), "regulator": regulator}})
+    return {"success": True, "status": "success", "report_submitted": True, "regulator": regulator}
+
+def freeze_suspicious_account(payload, config):
+    logger.warning("action_freeze_suspicious_account", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "account_frozen": True}
+
+def send_payment_reminder(payload, config):
+    logger.info("action_send_payment_reminder", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "payment_reminder_sent": True}
+
+def send_overdue_notice(payload, config):
+    logger.warning("action_send_overdue_notice", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "overdue_notice_sent": True}
+
+def initiate_collection(payload, config):
+    logger.warning("action_initiate_collection", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "collection_initiated": True}
+
+def assign_recovery_agent(payload, config):
+    agent_id = config.get("agent_id", "AGENT_AUTO")
+    logger.info("action_assign_recovery_agent", extra={"extra_data": {"entity_id": payload.get("entity_id"), "agent_id": agent_id}})
+    return {"success": True, "status": "success", "recovery_agent_assigned": True, "agent_id": agent_id}
+
+def send_legal_notice(payload, config):
+    logger.warning("action_send_legal_notice", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "legal_notice_sent": True}
+
+def initiate_legal_action(payload, config):
+    logger.error("action_initiate_legal_action", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "legal_action_initiated": True}
+
+def write_off_loan(payload, config):
+    logger.error("action_write_off_loan", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "loan_written_off": True}
+
+def restructure_loan(payload, config):
+    logger.info("action_restructure_loan", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "loan_restructured": True}
+
+def waive_penalty(payload, config):
+    logger.info("action_waive_penalty", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "penalty_waived": True}
+
+def open_account(payload, config):
+    account_type = config.get("account_type", "savings")
+    logger.info("action_open_account", extra={"extra_data": {"entity_id": payload.get("entity_id"), "account_type": account_type}})
+    return {"success": True, "status": "success", "account_opened": True, "account_type": account_type, "account_number": f"ACC-{int(__import__('time').time())}"}
+
+def close_account(payload, config):
+    logger.info("action_close_account", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "account_closed": True}
+
+def upgrade_account(payload, config):
+    tier = config.get("tier", "premium")
+    logger.info("action_upgrade_account", extra={"extra_data": {"entity_id": payload.get("entity_id"), "tier": tier}})
+    return {"success": True, "status": "success", "account_upgraded": True, "tier": tier}
+
+def block_debit_card(payload, config):
+    logger.warning("action_block_debit_card", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "card_blocked": True}
+
+def issue_new_card(payload, config):
+    card_type = config.get("card_type", "debit")
+    logger.info("action_issue_new_card", extra={"extra_data": {"entity_id": payload.get("entity_id"), "card_type": card_type}})
+    return {"success": True, "status": "success", "card_issued": True, "card_type": card_type}
+
+def update_credit_limit(payload, config):
+    new_limit = config.get("new_limit", 0)
+    logger.info("action_update_credit_limit", extra={"extra_data": {"entity_id": payload.get("entity_id"), "new_limit": new_limit}})
+    return {"success": True, "status": "success", "credit_limit_updated": True, "new_limit": new_limit}
+
+def activate_overdraft(payload, config):
+    limit = config.get("overdraft_limit", 0)
+    logger.info("action_activate_overdraft", extra={"extra_data": {"entity_id": payload.get("entity_id"), "limit": limit}})
+    return {"success": True, "status": "success", "overdraft_activated": True}
+
+def reactivate_dormant_account(payload, config):
+    logger.info("action_reactivate_dormant_account", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "account_reactivated": True}
+
+def process_neft(payload, config):
+    amount = config.get("amount", 0)
+    logger.info("action_process_neft", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "neft_processed": True, "reference": f"NEFT-{int(__import__('time').time())}"}
+
+def process_rtgs(payload, config):
+    amount = config.get("amount", 0)
+    logger.info("action_process_rtgs", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "rtgs_processed": True, "reference": f"RTGS-{int(__import__('time').time())}"}
+
+def process_imps(payload, config):
+    amount = config.get("amount", 0)
+    logger.info("action_process_imps", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "imps_processed": True, "reference": f"IMPS-{int(__import__('time').time())}"}
+
+def reverse_transaction(payload, config):
+    logger.warning("action_reverse_transaction", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "transaction_reversed": True}
+
+def hold_funds(payload, config):
+    amount = config.get("amount", 0)
+    logger.warning("action_hold_funds", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "funds_held": True, "amount": amount}
+
+def release_funds(payload, config):
+    logger.info("action_release_funds", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "funds_released": True}
+
+def charge_penalty(payload, config):
+    amount = config.get("penalty_amount", 0)
+    logger.warning("action_charge_penalty", extra={"extra_data": {"entity_id": payload.get("entity_id"), "amount": amount}})
+    return {"success": True, "status": "success", "penalty_charged": True, "amount": amount}
+
+def apply_interest(payload, config):
+    rate = config.get("interest_rate", 0)
+    logger.info("action_apply_interest", extra={"extra_data": {"entity_id": payload.get("entity_id"), "rate": rate}})
+    return {"success": True, "status": "success", "interest_applied": True}
+
+def run_bureau_check(payload, config):
+    bureau = config.get("bureau", "CIBIL")
+    logger.info("action_run_bureau_check", extra={"extra_data": {"entity_id": payload.get("entity_id"), "bureau": bureau}})
+    return {"success": True, "status": "success", "bureau_check_done": True, "bureau": bureau}
+
+def calculate_risk_score(payload, config):
+    logger.info("action_calculate_risk_score", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "risk_score_calculated": True, "risk_score": 65}
+
+def flag_high_risk_customer(payload, config):
+    logger.warning("action_flag_high_risk_customer", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "flagged_high_risk": True}
+
+def approve_underwriting(payload, config):
+    logger.info("action_approve_underwriting", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "underwriting_approved": True}
+
+def reject_underwriting(payload, config):
+    reason = config.get("reason", "risk_too_high")
+    logger.warning("action_reject_underwriting", extra={"extra_data": {"entity_id": payload.get("entity_id"), "reason": reason}})
+    return {"success": True, "status": "success", "underwriting_rejected": True, "reason": reason}
+
+def send_risk_alert(payload, config):
+    logger.warning("action_send_risk_alert", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "risk_alert_sent": True}
+
+def send_statement(payload, config):
+    period = config.get("period", "monthly")
+    logger.info("action_send_statement", extra={"extra_data": {"entity_id": payload.get("entity_id"), "period": period}})
+    return {"success": True, "status": "success", "statement_sent": True, "period": period}
+
+def send_noc(payload, config):
+    logger.info("action_send_noc", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "noc_issued": True, "noc_number": f"NOC-{int(__import__('time').time())}"}
+
+def schedule_customer_callback(payload, config):
+    logger.info("action_schedule_customer_callback", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "callback_scheduled": True}
+
+def escalate_to_rm(payload, config):
+    logger.info("action_escalate_to_rm", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "escalated_to_rm": True}
+
+def send_welcome_kit(payload, config):
+    logger.info("action_send_welcome_kit", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "welcome_kit_sent": True}
+
+def notify_branch(payload, config):
+    logger.info("action_notify_branch", extra={"extra_data": {"entity_id": payload.get("entity_id")}})
+    return {"success": True, "status": "success", "branch_notified": True}
