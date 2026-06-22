@@ -65,9 +65,10 @@ alembic/__pycache__/
 *.bin
 *.pt
 *.onnx
-models/
+/models/
 .cache/
 hf_cache/
+!app/models/
 
 # =========================
 # 🧑‍💻 IDE / OS
