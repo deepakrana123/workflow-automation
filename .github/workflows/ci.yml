@@ -57,8 +57,8 @@ jobs:
       - name: Validate Docker Image
         run: |
           docker run --rm \
-          -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \ workflow-platform python -c "import app.main"
-
+          -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+          workflow-platform python -c "import app.main"
   deploy-staging:
     if: github.ref == 'refs/heads/release/local-stable'
     needs: validate
