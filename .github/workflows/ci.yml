@@ -49,11 +49,6 @@ jobs:
         run: |
           docker build -t workflow-platform .
       
-
-      # - name: Validate Docker Image
-      #   run: |
-      #     docker run --rm workflow-platform python --version
-
       - name: Validate Docker Image
         run: |
           docker run --rm \
