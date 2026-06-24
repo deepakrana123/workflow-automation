@@ -64,7 +64,7 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
       - name: Deploy Staging
-        run: railway up
+        run: railway up --service workflow-automation
         env:
            RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}
   
@@ -77,7 +77,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Railway CLI
         run: npm install -g @railway/cli
-      - name: Deploy Staging
-        run: railway up
+      - run: railway up --service workflow-automation
         env:
           RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}
