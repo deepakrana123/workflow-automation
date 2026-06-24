@@ -36,7 +36,6 @@
 #     finally:
 #         db.close()
 
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
@@ -70,8 +69,30 @@ def get_session_local():
         )
     return _SessionLocal
 
+# =====================================================
+# 👇 COMPATIBILITY LAYER — Keeps old code working
+# =====================================================
+
+class _SessionLocalProxy:
+    """Allows old code to use SessionLocal() just like before."""
+    def __call__(self):
+        return get_session_local()()
+    
+    def __getattr__(self, name):
+        # Forward any other attribute access to the real SessionLocal class
+        return getattr(get_session_local(), name)
+
+class _EngineProxy:
+    """Allows old code to use engine just like before."""
+    def __getattr__(self, name):
+        return getattr(get_engine(), name)
+
+# These look like the old globals, but they're lazy proxies
+SessionLocal = _SessionLocalProxy()
+engine = _EngineProxy()
+
 def get_db():
-    db = get_session_local()()
+    db = SessionLocal()
     try:
         yield db
     finally:
