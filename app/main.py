@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import os
 load_dotenv()
 
 from app.routes.workflows import router as workflow_router
@@ -19,7 +18,7 @@ from app.routes.settings import router as settings_router
 from app.core import startup as startup_module
 
 
-print(os.getenv("DATABASE_URL"))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
