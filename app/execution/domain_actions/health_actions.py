@@ -7,9 +7,10 @@ medication reminders, care escalation, discharge workflows.
 
 import time
 from app.core.logger import logger
+from app.workflow_execution.schemas.action_result import ActionResult
 
 
-def schedule_appointment(payload: dict, config: dict) -> dict:
+def schedule_appointment(payload: dict, config: dict) -> ActionResult:
     """Schedule a patient appointment with a doctor/specialist."""
     appointment_type = config.get("appointment_type", "general")
     priority = config.get("priority", "routine")
@@ -18,15 +19,14 @@ def schedule_appointment(payload: dict, config: dict) -> dict:
         "appointment_type": appointment_type,
         "priority": priority,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "appointment_id": f"APT-{int(time.time())}",
         "appointment_type": appointment_type,
         "priority": priority,
-    }
+    })
 
 
-def send_medication_reminder(payload: dict, config: dict) -> dict:
+def send_medication_reminder(payload: dict, config: dict) -> ActionResult:
     """Send medication reminder to patient via SMS/app notification."""
     medication = config.get("medication_name", "prescribed_medication")
     channel = config.get("channel", "sms")
@@ -36,15 +36,14 @@ def send_medication_reminder(payload: dict, config: dict) -> dict:
         "medication": medication,
         "channel": channel,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "medication": medication,
         "channel": channel,
         "frequency": frequency,
-    }
+    })
 
 
-def alert_care_team(payload: dict, config: dict) -> dict:
+def alert_care_team(payload: dict, config: dict) -> ActionResult:
     """Alert the care team about a patient condition change."""
     alert_level = config.get("alert_level", "moderate")
     team = config.get("team", "primary_care")
@@ -53,15 +52,14 @@ def alert_care_team(payload: dict, config: dict) -> dict:
         "alert_level": alert_level,
         "team": team,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "alert_level": alert_level,
         "team_notified": team,
         "alert_id": f"ALT-{int(time.time())}",
-    }
+    })
 
 
-def escalate_to_specialist(payload: dict, config: dict) -> dict:
+def escalate_to_specialist(payload: dict, config: dict) -> ActionResult:
     """Escalate patient case to a specialist."""
     specialty = config.get("specialty", "general_medicine")
     urgency = config.get("urgency", "routine")
@@ -70,15 +68,14 @@ def escalate_to_specialist(payload: dict, config: dict) -> dict:
         "specialty": specialty,
         "urgency": urgency,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "specialty": specialty,
         "urgency": urgency,
         "referral_id": f"REF-{int(time.time())}",
-    }
+    })
 
 
-def notify_lab_result(payload: dict, config: dict) -> dict:
+def notify_lab_result(payload: dict, config: dict) -> ActionResult:
     """Notify patient and doctor when lab results are ready."""
     result_type = config.get("result_type", "blood_test")
     notify_patient = config.get("notify_patient", True)
@@ -87,15 +84,14 @@ def notify_lab_result(payload: dict, config: dict) -> dict:
         "entity_id": payload.get("entity_id"),
         "result_type": result_type,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "result_type": result_type,
         "patient_notified": notify_patient,
         "doctor_notified": notify_doctor,
-    }
+    })
 
 
-def trigger_emergency_protocol(payload: dict, config: dict) -> dict:
+def trigger_emergency_protocol(payload: dict, config: dict) -> ActionResult:
     """Trigger emergency response protocol for critical patient condition."""
     protocol = config.get("protocol", "code_blue")
     location = config.get("location", "unknown")
@@ -104,15 +100,14 @@ def trigger_emergency_protocol(payload: dict, config: dict) -> dict:
         "protocol": protocol,
         "location": location,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "protocol": protocol,
         "location": location,
         "response_team_notified": True,
-    }
+    })
 
 
-def send_discharge_instructions(payload: dict, config: dict) -> dict:
+def send_discharge_instructions(payload: dict, config: dict) -> ActionResult:
     """Send post-discharge care instructions to patient."""
     channel = config.get("channel", "email")
     followup_days = config.get("followup_days", 7)
@@ -121,14 +116,13 @@ def send_discharge_instructions(payload: dict, config: dict) -> dict:
         "channel": channel,
         "followup_days": followup_days,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "channel": channel,
         "followup_appointment_days": followup_days,
-    }
+    })
 
 
-def flag_high_risk_patient(payload: dict, config: dict) -> dict:
+def flag_high_risk_patient(payload: dict, config: dict) -> ActionResult:
     """Flag patient as high risk for proactive monitoring."""
     risk_level = config.get("risk_level", "high")
     reason = config.get("reason", "chronic_condition")
@@ -137,15 +131,14 @@ def flag_high_risk_patient(payload: dict, config: dict) -> dict:
         "risk_level": risk_level,
         "reason": reason,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "risk_level": risk_level,
         "reason": reason,
         "monitoring_enabled": True,
-    }
+    })
 
 
-def request_insurance_approval(payload: dict, config: dict) -> dict:
+def request_insurance_approval(payload: dict, config: dict) -> ActionResult:
     """Submit insurance pre-authorization request for procedure."""
     procedure = config.get("procedure", "general")
     insurer = config.get("insurer", "primary_insurer")
@@ -154,15 +147,14 @@ def request_insurance_approval(payload: dict, config: dict) -> dict:
         "procedure": procedure,
         "insurer": insurer,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "procedure": procedure,
         "insurer": insurer,
         "auth_request_id": f"AUTH-{int(time.time())}",
-    }
+    })
 
 
-def send_wellness_check(payload: dict, config: dict) -> dict:
+def send_wellness_check(payload: dict, config: dict) -> ActionResult:
     """Send periodic wellness check to patient for chronic condition monitoring."""
     check_type = config.get("check_type", "general_wellness")
     channel = config.get("channel", "sms")
@@ -171,8 +163,7 @@ def send_wellness_check(payload: dict, config: dict) -> dict:
         "check_type": check_type,
         "channel": channel,
     }})
-    return {
-        "success": True, "status": "success",
+    return ActionResult(success=True, outputs={
         "check_type": check_type,
         "channel": channel,
-    }
+    })

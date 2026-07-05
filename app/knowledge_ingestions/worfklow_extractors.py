@@ -14,8 +14,6 @@ class WorkflowExtractor:
         )
 
         result = try_call_gemini_rest(prompt)
-        print(result,'hlow')
-
         if not result["success"]:
             raise WorkflowExtractionError(result["error"])
 

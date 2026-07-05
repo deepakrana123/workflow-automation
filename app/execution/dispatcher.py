@@ -1,4 +1,5 @@
 import os
+from app.workflow_execution.schemas.action_result import ActionResult
 from app.execution.actions import (
     send_reminder, escalate_case, assign_senior_officer,
     notify_manager, notify_customer, close_case, reject_loan, validate_payment_handler,
@@ -68,6 +69,7 @@ from app.execution.chaos_actions import (
     _apply_chaos, _chaos_response,
 )
 from app.core.logger import logger
+from app.workflow_execution.schemas.action_result import ActionResult
 
 
 # ── PRODUCTION ACTION MAP ─────────────────────────────────────────────────────
@@ -298,7 +300,7 @@ _CHAOS_ENABLED = os.getenv("CHAOS_MODE", "false").lower() == "true"
 ACTION_MAP = _CHAOS_ACTION_MAP if _CHAOS_ENABLED else _PRODUCTION_ACTION_MAP
 
 
-def execute_action(action_name: str, payload: dict, config: dict) -> dict:
+def execute_action(action_name: str, payload: dict, config: dict) -> ActionResult:
     handler = ACTION_MAP.get(action_name)
 
     # DB fallback — resolve via handler_name column in action_definitions
@@ -319,13 +321,12 @@ def execute_action(action_name: str, payload: dict, config: dict) -> dict:
                 "available_actions": sorted(ACTION_MAP.keys()),
             }},
         )
-        return {
-            "success": False,
-            "status": "failed",
-            "action": action_name,
-            "reason": "unknown_action",
-            "skip_retry": True,
-        }
+        return ActionResult(
+            success=False,
+            error=f"Unknown action: {action_name}",
+            message="Action not registered in dispatcher",
+            metadata={"skip_retry": True},
+        )
 
     logger.info(
         "action_dispatched",
@@ -337,7 +338,7 @@ def execute_action(action_name: str, payload: dict, config: dict) -> dict:
     )
 
     try:
-        result = handler(payload, config)
+        raw = handler(payload, config)
     except Exception as e:
         logger.warning(
             "action_raised_exception",
@@ -345,11 +346,30 @@ def execute_action(action_name: str, payload: dict, config: dict) -> dict:
         )
         raise
 
-    if result.get("status") == "success" or result.get("success"):
+    # Normalise — raw may be ActionResult (new actions) or dict (legacy/chaos)
+    if isinstance(raw, ActionResult):
+        result = raw
+    else:
+        success = raw.get("success", False) or raw.get("status") == "success"
+        outputs = {k: v for k, v in raw.items() if k not in ("success", "status", "skip_retry", "message", "error")}
+        result = ActionResult(
+            success=success,
+            outputs=outputs,
+            message=raw.get("message"),
+            error=raw.get("error"),
+            metadata={"skip_retry": raw.get("skip_retry", False)},
+        )
+
+    if result.success:
         logger.info("action_success", extra={"extra_data": {"action_name": action_name}})
     else:
         logger.warning("action_failed", extra={"extra_data": {
-            "action_name": action_name, "result": result,
+            "action_name": action_name,
+            "error": result.error,
+        }})
+
+    return result
+            "action_name": action_name, "result": result.model_dump(),
         }})
 
     return result

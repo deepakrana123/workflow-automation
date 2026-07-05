@@ -15,6 +15,7 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.analytics import router as analytics_router
 from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
+from app.routes.knowledge_ingestion import router as knowledge_ingestion_router
 from app.core import startup as startup_module
 
 
@@ -55,6 +56,7 @@ app.include_router(dashboard_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(knowledge_ingestion_router, prefix="/api")
 
 
 @app.get("/")

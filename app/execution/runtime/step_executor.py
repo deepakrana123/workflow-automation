@@ -7,6 +7,7 @@ from app.execution.runtime.step_execution_service import (
 )
 from app.execution.dispatcher import execute_action
 from app.execution.retry_handler import handle_retry
+from app.workflow_execution.schemas.action_result import ActionResult
 from app.repositories.step_retry_history_repo import record_retry_history
 from app.core.tracing import generate_span_id, inject_trace_into_payload, build_log_context
 from app.services import trace_service
@@ -108,14 +109,14 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
         # ── CHECKPOINT: execute_action ────────────────────────────────────────
         checkpoint = _CP_DISPATCH
         result  = execute_action(action_name=action, payload=traced_payload, config=config)
-        success = result.get("success") is True or result.get("status") == "success"
-        skip_retry = result.get("skip_retry", False)
+        success = result.success
+        skip_retry = result.metadata.get("skip_retry", False)
 
         if success:
             # ── CHECKPOINT: mark_step_completed ──────────────────────────────
             checkpoint = _CP_MARK_COMPLETED
             mark_step_completed(
-                db=db, step_execution=step_execution, output_payload=result
+                db=db, step_execution=step_execution, output_payload=result.model_dump()
             )
 
             trace_service.record_action_success(
@@ -123,13 +124,13 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                 workflow_execution=workflow_execution,
                 step_execution=step_execution,
                 action_name=action,
-                result=result,
+                result=result.model_dump(),
             )
             trace_service.record_step_completed(
                 db=db,
                 workflow_execution=workflow_execution,
                 step_execution=step_execution,
-                result=result,
+                result=result.model_dump(),
             )
 
             logger.info(
@@ -143,24 +144,25 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                 },
             )
 
-            return {"success": True, "result": result}
+            return {"success": True, "result": result.model_dump()}
 
         # ── CHECKPOINT: mark_step_failed (non-success result) ─────────────────
         checkpoint = _CP_MARK_FAILED
-        mark_step_failed(db=db, step_execution=step_execution, error=str(result))
+        step_error = result.error or str(result.outputs)
+        mark_step_failed(db=db, step_execution=step_execution, error=step_error)
 
         trace_service.record_action_failed(
             db=db,
             workflow_execution=workflow_execution,
             step_execution=step_execution,
             action_name=action,
-            error=str(result),
+            error=step_error,
         )
         trace_service.record_step_failed(
             db=db,
             workflow_execution=workflow_execution,
             step_execution=step_execution,
-            error=str(result),
+            error=step_error,
         )
 
         logger.warning(
@@ -169,7 +171,7 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                 "extra_data": build_log_context(
                     workflow_execution=workflow_execution,
                     execution_step=step_execution,
-                    extra={"action": action, "error": str(result)},
+                    extra={"action": action, "error": step_error},
                 )
             },
         )
@@ -179,7 +181,7 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
         retry_result = handle_retry(
             db=db,
             step_execution=step_execution,
-            error=str(result),
+            error=step_error,
             workflow_execution=workflow_execution,
             skip_retry=skip_retry,
         )
@@ -190,10 +192,10 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
             attempt_number=retry_result.get("attempts", 1),
             trigger="retry" if retry_result.get("retry_scheduled") else "dlq",
             status_at_attempt=step_execution.status,
-            error=str(result),
+            error=step_error,
         )
 
-        return {"success": False, "result": result}
+        return {"success": False, "result": result.model_dump()}
 
     except Exception as e:
         # ── DIAGNOSTIC LOG — tells you exactly where the crash happened ───────
