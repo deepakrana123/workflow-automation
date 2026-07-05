@@ -54,29 +54,29 @@ jobs:
           docker run --rm \
           -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
           workflow-platform python -c "import app.main"
-  deploy-staging:
-    if: github.ref == 'refs/heads/release/local-stable'
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      - name: Deploy Staging
-        run: railway up --service workflow-automation
-        env:
-           RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}
+  # deploy-staging:
+  #   if: github.ref == 'refs/heads/release/local-stable'
+  #   needs: validate
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout Repository
+  #       uses: actions/checkout@v4
+  #     - name: Install Railway CLI
+  #       run: npm install -g @railway/cli
+  #     - name: Deploy Staging
+  #       run: railway up --service workflow-automation
+  #       env:
+  #          RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}
   
-  deploy-production:
-    if: github.ref == 'refs/heads/master'
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      - run: railway up --service workflow-automation
-        env:
-          RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}
+  # deploy-production:
+  #   if: github.ref == 'refs/heads/master'
+  #   needs: validate
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout Repository
+  #       uses: actions/checkout@v4
+  #     - name: Install Railway CLI
+  #       run: npm install -g @railway/cli
+  #     - run: railway up --service workflow-automation
+  #       env:
+  #         RAILWAY_TOKEN: ${{secrets.RAILWAY_TOKEN}}

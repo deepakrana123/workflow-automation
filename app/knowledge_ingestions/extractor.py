@@ -29,7 +29,6 @@ class DocumentExtractor:
                 if not page_content:
                     continue
                 page_texts.append(page_content)
-            print("Trying PyPDF extraction...",page_texts)
             if not page_texts:
                 return self.ocr_extractor.extract(file_path)
             return "\n".join(page_texts)

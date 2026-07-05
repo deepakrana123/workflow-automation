@@ -21,6 +21,12 @@ from app.models.trace_event import TraceEvent
 from app.models.trigger_definitions import TriggerDefinition
 from app.models.action_definitions import ActionDefinition
 from app.models.generation_log import GenerationLog
+from app.models.workflow_knowledge import WorkflowKnowledge
+from app.models.workflow_action_mapping import WorkflowActionMapping
+from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
+from app.models.workflow_business_rule import WorkflowBusinessRule
+from app.models.workflow_actor import WorkflowActor
+from app.models.workflow_external_system import WorkflowExternalSystem
 
 config = context.config
 

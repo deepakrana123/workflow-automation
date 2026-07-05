@@ -3,10 +3,11 @@ import os
 import time
 
 from app.core.logger import logger
-
+from dotenv import load_dotenv
+load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "10"))
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
 
 URL = (
     f"https://generativelanguage.googleapis.com/v1beta/"
@@ -49,6 +50,7 @@ def try_call_gemini_rest(prompt: str) -> dict:
         response.raise_for_status()
         data = response.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
+        output=clean_llm_output(text)
         latency_ms = int((time.time() - start) * 1000)
 
         logger.info(
@@ -58,7 +60,7 @@ def try_call_gemini_rest(prompt: str) -> dict:
         return {
             "success": True,
             "provider": "gemini",
-            "output": text,
+            "output": output,
             "latency_ms": latency_ms,
             "error_type": None,
         }
@@ -106,3 +108,15 @@ def try_call_gemini_rest(prompt: str) -> dict:
             "error_type": "unexpected",
             "latency_ms": latency_ms,
         }
+
+
+def clean_llm_output(text: str) -> str:
+    text = text.strip()
+
+    if text.startswith("```json"):
+        text = text[7:]
+
+    if text.endswith("```"):
+        text = text[:-3]
+
+    return text.strip()
