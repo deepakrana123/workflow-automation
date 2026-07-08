@@ -1,3 +1,4 @@
+from typing import List
 from app.models.workflow_knowledge import WorkflowKnowledge
 from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.workflow_action_mapping import WorkflowActionMapping
@@ -88,21 +89,35 @@ class WorkflowRepository:
         )
 
     def find_best_action(self, embedding):
+        # Backward compatibility.
+        # Will be removed once HybridRetriever is fully integrated.
+        results = self.search_actions_by_embedding(embedding, limit=1)
+        return results[0] if results else None
+
+    def find_best_trigger(self, embedding):
+        # Backward compatibility.
+        # Will be removed once HybridRetriever is fully integrated.
+        results = self.search_triggers_by_embedding(embedding, limit=1)
+        return results[0] if results else None
+
+    def search_actions_by_embedding(self, embedding, limit: int = 20)-> list[tuple[ActionDefinition, float]]:
         distance = ActionDefinition.embedding.cosine_distance(embedding)
         return (
             self.db.query(ActionDefinition, distance.label("distance"))
             .filter(ActionDefinition.active.is_(True))
             .order_by(distance)
-            .first()
+            .limit(limit)
+            .all()
         )
 
-    def find_best_trigger(self, embedding):
+    def search_triggers_by_embedding(self, embedding, limit: int = 20)-> list[tuple[ActionDefinition, float]]:
         distance = TriggerDefinition.embedding.cosine_distance(embedding)
         return (
             self.db.query(TriggerDefinition, distance.label("distance"))
             .filter(TriggerDefinition.active.is_(True))
             .order_by(distance)
-            .first()
+            .limit(limit)
+            .all()
         )
 
     def update_action_mapping(
@@ -117,7 +132,7 @@ class WorkflowRepository:
             .filter(WorkflowActionMapping.id == mapping_id)
             .first()
         )
-        print(mapping)
+
         if mapping is None:
             return
 
@@ -142,7 +157,7 @@ class WorkflowRepository:
         if mapping is None:
             return
 
-        mapping.matched_trigger_definition_id = (trigger_definitation_id,)
+        mapping.matched_trigger_definition_id = trigger_definitation_id
         mapping.similarity_score = similarity_score
         mapping.confidence = confidence
         self.db.commit()
