@@ -1,0 +1,118 @@
+BUSINESS REQUIREMENT DOCUMENT
+Document ID   : BRD-FIN-001
+Title         : Personal Loan Origination Workflow
+Department    : Retail Lending
+Version       : 1.2
+Date          : 2024-01-15
+Status        : Approved
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PURPOSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This document defines the end-to-end business workflow for processing a personal loan application from submission to disbursement. The workflow applies to all retail customers applying for personal loans up to INR 25,00,000.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. SCOPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In scope:
+- New personal loan applications submitted via branch or digital channel
+- Credit assessment and underwriting
+- Documentation verification
+- Loan sanction and disbursement
+
+Out of scope:
+- Top-up loans on existing accounts
+- Business loans
+- Secured loans
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. WORKFLOW DESCRIPTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1 Trigger Event
+
+The workflow is initiated when a customer submits a personal loan application through any channel (branch, mobile app, or website). The application must contain the applicant's personal details, employment information, and loan amount requested.
+
+3.2 KYC Verification
+
+Upon receiving the application, the system must initiate KYC verification for the applicant. The KYC team collects and verifies identity documents (Aadhaar, PAN), address proof, and income documents.
+
+If KYC documents are incomplete, the system sends a document checklist to the customer via SMS and email with a 7-day deadline. If the customer does not respond within 7 days, the application is marked as abandoned.
+
+Once all documents are received, the system verifies the submitted documents for authenticity and completeness.
+
+3.3 Credit Bureau Check
+
+After successful KYC verification, the system runs a CIBIL bureau check to retrieve the applicant's credit score and credit history report. The bureau check must be completed within 2 minutes of initiation.
+
+Business Rules:
+- If CIBIL score is below 650, the application must be rejected. The system sends a low CIBIL alert to the credit risk team and a rejection letter is sent to the customer.
+- If CIBIL score is 650 or above, the workflow proceeds to income verification.
+
+3.4 Income Verification
+
+The credit team verifies the applicant's income through salary slips, bank statements, and ITR documents. For salaried employees, the last 3 months' salary slips are mandatory. For self-employed applicants, 2 years of ITR is required.
+
+Business Rules:
+- Debt-to-income ratio must not exceed 50%.
+- Minimum monthly income must be INR 25,000 for loan amounts above INR 5,00,000.
+
+3.5 Credit Assessment and Underwriting
+
+Based on the CIBIL score, income, and employment stability, the underwriting team performs a credit assessment. The system calculates the risk score for the applicant.
+
+Business Rules:
+- Applications with risk score above 70 are auto-approved.
+- Applications with risk score between 50 and 70 require manual underwriting review.
+- Applications with risk score below 50 are rejected.
+
+For approved applications, the underwriting team approves the underwriting decision.
+
+3.6 Loan Sanction
+
+Upon underwriting approval, the system generates a loan sanction letter specifying the approved loan amount, interest rate, tenure, and EMI. The sanction letter is sent to the customer for acceptance.
+
+The system also sends the loan offer to the customer via email and SMS.
+
+3.7 Loan Agreement and EMI Calculation
+
+After the customer accepts the offer, the system generates a formal loan agreement document. The system calculates the EMI based on the principal amount, interest rate, and tenure. A full repayment schedule is generated and sent to the customer.
+
+3.8 Disbursement
+
+Once the loan agreement is signed and returned, the system disburses the loan amount directly to the customer's savings account. A disbursement advice is sent to the customer confirming the transfer.
+
+3.9 Post-Disbursement
+
+After disbursement, the system links the insurance policy to the loan account as per regulatory requirement. The system sends payment reminders 5 days before each EMI due date.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. ACTORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Customer: Submits application, provides documents, accepts offer
+- Credit Risk Team: Reviews CIBIL alerts, performs manual underwriting
+- KYC Team: Verifies documents
+- Loan Operations: Processes disbursement
+- Relationship Manager: Assists customer through process
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. EXTERNAL SYSTEMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- CIBIL/Bureau API: Credit score retrieval
+- Core Banking System (CBS): Account lookup and fund transfer
+- Document Management System (DMS): Document storage
+- SMS Gateway: Customer notifications
+- Email Service: Document delivery
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. ASSUMPTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Customer already has a savings account with the bank
+- CIBIL API is available 24/7 with SLA of 2 minutes
+- Loan amount does not exceed INR 25,00,000
+- Customer is a resident Indian individual aged 21-60

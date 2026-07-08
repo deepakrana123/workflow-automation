@@ -1,0 +1,105 @@
+BUSINESS REQUIREMENT DOCUMENT
+Document ID   : BRD-FIN-002
+Title         : Fraud Detection and Response Workflow
+Department    : Risk and Compliance
+Version       : 2.0
+Date          : 2024-02-10
+Status        : Approved
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PURPOSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This document defines the automated response workflow triggered when the fraud detection system identifies a potentially fraudulent transaction or suspicious account activity. The objective is to minimize financial loss while preserving customer trust.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. SCOPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In scope:
+- Card-not-present fraud
+- Account takeover attempts
+- Unusual transaction patterns
+- Multiple failed authentication attempts
+
+Out of scope:
+- Internal employee fraud
+- Physical card theft (handled by separate process)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. WORKFLOW DESCRIPTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1 Trigger Event
+
+The workflow is initiated when a fraudulent transaction is detected or suspicious account activity is identified by the fraud monitoring system. This includes transactions flagged by rule-based detection or ML models with a fraud probability above the configured threshold.
+
+3.2 Immediate Account Action
+
+Upon fraud detection, the system must immediately freeze the suspicious account to prevent further unauthorized transactions. Freezing must occur within 30 seconds of the fraud alert.
+
+Simultaneously, the system places a hold on any pending funds associated with the suspicious transaction.
+
+3.3 AML Screening
+
+The system performs an Anti-Money Laundering screening on the customer and the transaction. The AML check cross-references the customer profile against internal watchlists and regulatory blacklists.
+
+3.4 Sanctions Check
+
+Following AML screening, the system performs a sanctions check against OFAC, UN, and local regulatory sanctions lists. Both checks (AML and sanctions) can be performed in parallel.
+
+3.5 Customer Notification
+
+The system sends an alert to the customer about the suspicious activity via both SMS and email. The notification must be sent within 2 minutes of the account freeze. The notification includes the transaction details flagged and instructions for the customer to contact the bank.
+
+3.6 Risk Team Alert
+
+The system sends a risk alert to the fraud investigation team with full transaction details, customer profile, and fraud score. The notification escalates to the manager on duty if the transaction amount exceeds INR 1,00,000.
+
+3.7 Flag for Review
+
+The account and transaction are flagged for manual investigation. The fraud investigation team reviews the case within 4 hours of flagging.
+
+Business Rules:
+- If the investigation confirms fraud: maintain account freeze, initiate legal proceedings if amount exceeds INR 5,00,000
+- If the investigation clears the customer: release the account freeze, unblock the funds
+
+3.8 Audit and Compliance
+
+Every fraud event must be recorded in the compliance audit trail. An audit record is created with the complete timeline of events, actions taken, and outcome.
+
+For transactions above INR 10,00,000, a regulatory report must be submitted to the Financial Intelligence Unit (FIU) within 24 hours.
+
+3.9 Risk Score Update
+
+After investigation, the customer risk score is recalculated and updated in the risk management system. If confirmed as high risk, the customer is flagged as high risk in the system for enhanced monitoring.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. BUSINESS RULES SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Account must be frozen within 30 seconds of fraud alert
+- Customer notification must be sent within 2 minutes
+- Transactions above INR 1,00,000 escalate to duty manager
+- Transactions above INR 10,00,000 require regulatory reporting
+- Investigation must be completed within 4 working hours
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. ACTORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Fraud Monitoring System: Automated detection
+- Fraud Investigation Team: Manual case review
+- Compliance Officer: Regulatory reporting
+- Customer: Account holder
+- Manager: Escalation recipient for high-value transactions
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. EXTERNAL SYSTEMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Fraud Detection Engine: Rule-based and ML transaction scoring
+- AML System: Watchlist screening
+- OFAC/UN Sanctions API: Sanctions verification
+- Core Banking System: Account freeze and fund hold
+- FIU Reporting Portal: Regulatory submission
