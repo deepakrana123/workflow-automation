@@ -1,39 +1,73 @@
 from app.knowledge_ingestions.workflow_repository import WorkflowRepository
-from sentence_transformers import SentenceTransformer
+from app.semantic.embedding_provider import EmbeddingProvider
+from app.retrieval.hybrid_retriever import HybridRetriever
 
 
 class EmbeddingMapper:
-    def __init__(self, repository: WorkflowRepository):
+    def __init__(
+        self, repository: WorkflowRepository, hybrid_retriever: HybridRetriever
+    ):
         self.repository = repository
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.hybrid = hybrid_retriever
 
     def map_actions(self):
         actions = self.repository.get_unmapped_actions()
         for action in actions:
-            embedding = self.model.encode(
-                action.extract_name, normalize_embeddings=True
-            )
-            matched_action, distance = self.repository.find_best_action(embedding)
-            # if distance > 0.40:
+            query = f"{action.extract_name}{action.description}"
+            embedding = self.hybrid.embed(action.extract_name)
+            #   /  result = self.repository.find_best_action(embedding)
+            # if result is None:
             #     continue
+            # matched_action, distance = result
+            # similarity = 1.0 - float(distance)
+            # self.repository.update_action_mapping(
+            #     mapping_id=action.id,
+            #     action_definitation_id=matched_action.id,
+            #     similarity_score=similarity,
+            #     confidence=similarity,
+            # )
+            candidates = self.hybrid.search_actions(
+                query=query, embedding=embedding, limit=20
+            )
+            if not candidates:
+                continue
+
+            best = candidates[0]
+
             self.repository.update_action_mapping(
-                mapping_id = action.id,
-                action_definitation_id=matched_action.id,
-                similarity_score=float(distance),
-                confidence=float(distance)
+                mapping_id=action.id,
+                action_definitation_id=best.entity.id,
+                similarity_score=best.rrf_score,
+                confidence=best.rrf_score,
             )
 
     def map_triggers(self):
         triggers = self.repository.get_unmapped_triggers()
         for trigger in triggers:
-            embedding = self.model.encode(
-                trigger.extracted_name, normalize_embeddings=True
+            query = f"{trigger.extract_name}{trigger.description}"
+            embedding = self.hybrid.embed(trigger.extracted_name)
+            # result = self.repository.find_best_trigger(embedding)
+            # if result is None:
+            #     continue
+            # mapped_trigger, distance = result
+            # similarity = 1.0 - float(distance)
+            # self.repository.update_trigger_mapping(
+            #     mapping_id=trigger.id,
+            #     trigger_definitation_id=mapped_trigger.id,
+            #     similarity_score=similarity,
+            #     confidence=similarity,
+            # )
+            candidates = self.hybrid.search_actions(
+                query=query, embedding=embedding, limit=20
             )
-            mapped_trigger, distance = self.repository.find_best_trigger(embedding)
-           
+            if not candidates:
+                continue
+
+            best = candidates[0]
+
             self.repository.update_trigger_mapping(
                 mapping_id=trigger.id,
-                trigger_definitation_id=mapped_trigger.id,
-                similarity_score=float(distance),
-                confidence=float(distance)
+                trigger_definitation_id=best.entity.id,
+                similarity_score=best.rrf_score,
+                confidence=best.rrf_score,
             )

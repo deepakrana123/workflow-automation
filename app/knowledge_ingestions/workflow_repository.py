@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.knowledge_ingestions.exceptions import RepositoryError
 from app.models.action_definitions import ActionDefinition
 from app.models.trigger_definitions import TriggerDefinition
+from sqlalchemy import func
 
 
 class WorkflowRepository:
@@ -100,7 +101,9 @@ class WorkflowRepository:
         results = self.search_triggers_by_embedding(embedding, limit=1)
         return results[0] if results else None
 
-    def search_actions_by_embedding(self, embedding, limit: int = 20)-> list[tuple[ActionDefinition, float]]:
+    def search_actions_by_embedding(
+        self, embedding, limit: int = 20
+    ) -> list[tuple[ActionDefinition, float]]:
         distance = ActionDefinition.embedding.cosine_distance(embedding)
         return (
             self.db.query(ActionDefinition, distance.label("distance"))
@@ -110,7 +113,9 @@ class WorkflowRepository:
             .all()
         )
 
-    def search_triggers_by_embedding(self, embedding, limit: int = 20)-> list[tuple[ActionDefinition, float]]:
+    def search_triggers_by_embedding(
+        self, embedding, limit: int = 20
+    ) -> list[tuple[ActionDefinition, float]]:
         distance = TriggerDefinition.embedding.cosine_distance(embedding)
         return (
             self.db.query(TriggerDefinition, distance.label("distance"))
@@ -168,5 +173,57 @@ class WorkflowRepository:
             .filter(
                 WorkflowActionMapping.workflow_knowledge_id == workflow_knowledge_id
             )
+            .all()
+        )
+
+    def search_actions_by_postgress(self, query: str, limit: int = 20):
+        vector = func.to_tsvector(
+            "english",
+            func.concat(
+                ActionDefinition.name,
+                " ",
+                func.coalesce(ActionDefinition.description, " "),
+            ),
+        )
+        query = func.plainto_tsquery("english", query)
+        rank = func.ts_rank(vector, query)
+        return (
+            self.db.query(ActionDefinition, rank.label("rank"))
+            .filter(vector.op("@@")(query))
+            .order_by(rank.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def search_triggers_by_postgress(self, query: str, limit: int = 20):
+        vector = func.to_tsvector(
+            "english",
+            func.concat(
+                TriggerDefinition.name,
+                " ",
+                func.coalesce(TriggerDefinition.description, " "),
+            ),
+        )
+        query = func.plainto_tsquery("english", query)
+        rank = func.ts_rank(vector, query)
+        return (
+            self.db.query(TriggerDefinition, rank.label("rank"))
+            .filter(vector.op("@@")(query))
+            .order_by(rank.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def get_all_active_actions(self):
+        return (
+            self.db.query(ActionDefinition)
+            .filter(ActionDefinition.active.is_(True))
+            .all()
+        )
+
+    def get_all_active_triggers(self):
+        return (
+            self.db.query(TriggerDefinition)
+            .filter(TriggerDefinition.active.is_(True))
             .all()
         )
