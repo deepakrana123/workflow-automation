@@ -115,7 +115,7 @@ class WorkflowRepository:
 
     def search_triggers_by_embedding(
         self, embedding, limit: int = 20
-    ) -> list[tuple[ActionDefinition, float]]:
+    ) -> list[tuple[TriggerDefinition, float]]:
         distance = TriggerDefinition.embedding.cosine_distance(embedding)
         return (
             self.db.query(TriggerDefinition, distance.label("distance"))

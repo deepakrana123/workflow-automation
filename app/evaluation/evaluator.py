@@ -13,12 +13,15 @@ Accepts plain data structures — works with any input source.
 from app.evaluation.models import (
     ActionEvaluation,
     EvaluationReport,
+    RankingCandidate,
     TriggerEvaluation,
     WorkflowEvaluation,
 )
 from app.evaluation.metrics import (
     calculate_action_accuracy,
     calculate_average_similarity,
+    calculate_mean_reciprocal_rank_actions,
+    calculate_mean_reciprocal_rank_triggers,
     calculate_trigger_accuracy,
     count_unknown_actions,
     count_unknown_triggers,
@@ -32,21 +35,25 @@ class ExtractedAction:
     extracted_name    — raw name extracted from the BRD by the LLM
     predicted_name    — catalog action name matched by the embedding mapper
                         (None if no match was found)
-    similarity_score  — cosine similarity from the embedding mapper
+    similarity_score  — RRF score of the top candidate
                         (None if no match was found)
+    top_candidates    — ranked list of RankedCandidate objects from the retriever
+                        (optional; populated when --ranking flag is used)
     """
 
-    __slots__ = ("extracted_name", "predicted_name", "similarity_score")
+    __slots__ = ("extracted_name", "predicted_name", "similarity_score", "top_candidates")
 
     def __init__(
         self,
         extracted_name: str,
         predicted_name: str | None,
         similarity_score: float | None,
+        top_candidates: list | None = None,
     ) -> None:
         self.extracted_name = extracted_name
         self.predicted_name = predicted_name
         self.similarity_score = similarity_score
+        self.top_candidates = top_candidates or []
 
 
 class ExtractedTrigger:
@@ -56,21 +63,25 @@ class ExtractedTrigger:
     extracted_name    — raw name extracted from the BRD by the LLM
     predicted_name    — catalog trigger name matched by the embedding mapper
                         (None if no match was found)
-    similarity_score  — cosine similarity from the embedding mapper
+    similarity_score  — RRF score of the top candidate
                         (None if no match was found)
+    top_candidates    — ranked list of RankedCandidate objects from the retriever
+                        (optional; populated when --ranking flag is used)
     """
 
-    __slots__ = ("extracted_name", "predicted_name", "similarity_score")
+    __slots__ = ("extracted_name", "predicted_name", "similarity_score", "top_candidates")
 
     def __init__(
         self,
         extracted_name: str,
         predicted_name: str | None,
         similarity_score: float | None,
+        top_candidates: list | None = None,
     ) -> None:
         self.extracted_name = extracted_name
         self.predicted_name = predicted_name
         self.similarity_score = similarity_score
+        self.top_candidates = top_candidates or []
 
 
 class ExpectedWorkflow:
@@ -81,8 +92,8 @@ class ExpectedWorkflow:
     expected_actions      — list of canonical action names (from catalog)
     expected_triggers     — list of canonical trigger names (from catalog)
 
-    The order of expected_actions must correspond to the order of extracted actions
-    when calling Evaluator.evaluate_workflow().
+    Matching is set-based: an action is correct if its predicted name appears
+    anywhere in expected_actions, regardless of order.
     """
 
     __slots__ = ("workflow_name", "expected_actions", "expected_triggers")
@@ -101,6 +112,9 @@ class ExpectedWorkflow:
 class Evaluator:
     """
     Compares extracted workflow knowledge against expected ground truth.
+
+    Matching is set-based: a prediction is correct if it appears anywhere in
+    the expected set for that workflow, regardless of extraction order.
 
     Usage:
         evaluator = Evaluator()
@@ -125,18 +139,18 @@ class Evaluator:
         """
         Compare one extracted workflow against its ground truth.
 
-        Matching is positional for actions and triggers — the i-th extracted item
-        is compared against the i-th expected item. If counts differ, extra items
-        are evaluated as incorrect with no predicted match.
+        Matching is set-based — a prediction is correct if it is in the
+        expected set for that workflow. expected_rank is computed from
+        top_candidates if available.
 
         Returns a WorkflowEvaluation with per-item ActionEvaluation
         and TriggerEvaluation results.
         """
         action_results = self._evaluate_actions(
-            extracted_actions, expected.expected_actions
+            extracted_actions, set(expected.expected_actions)
         )
         trigger_results = self._evaluate_triggers(
-            extracted_triggers, expected.expected_triggers
+            extracted_triggers, set(expected.expected_triggers)
         )
         return WorkflowEvaluation(
             workflow_name=workflow_name,
@@ -152,7 +166,7 @@ class Evaluator:
         Aggregate per-workflow results into a single EvaluationReport.
 
         Flattens all action and trigger evaluations across workflows
-        and computes aggregate metrics.
+        and computes aggregate metrics including MRR.
         """
         all_actions: list[ActionEvaluation] = []
         all_triggers: list[TriggerEvaluation] = []
@@ -170,6 +184,8 @@ class Evaluator:
             average_similarity=calculate_average_similarity(all_actions, all_triggers),
             unknown_actions=count_unknown_actions(all_actions),
             unknown_triggers=count_unknown_triggers(all_triggers),
+            mean_reciprocal_rank_actions=calculate_mean_reciprocal_rank_actions(all_actions),
+            mean_reciprocal_rank_triggers=calculate_mean_reciprocal_rank_triggers(all_triggers),
             workflow_results=workflow_evaluations,
         )
 
@@ -178,74 +194,123 @@ class Evaluator:
     def _evaluate_actions(
         self,
         extracted: list[ExtractedAction],
-        expected_names: list[str],
+        expected_set: set[str],
     ) -> list[ActionEvaluation]:
         results: list[ActionEvaluation] = []
-        max_len = max(len(extracted), len(expected_names))
 
-        for i in range(max_len):
-            ext = extracted[i] if i < len(extracted) else None
-            exp_name = expected_names[i] if i < len(expected_names) else ""
+        for ext in extracted:
+            # Find rank of expected match in candidate list (1-based)
+            expected_rank = self._find_expected_rank(ext.top_candidates, expected_set)
 
-            if ext is None:
-                # Ground truth has more items than were extracted
-                results.append(
-                    ActionEvaluation(
-                        extracted_action="",
-                        expected_action=exp_name,
-                        predicted_action=None,
-                        similarity_score=None,
-                        correct=False,
-                    )
+            # Convert raw retriever candidates to RankingCandidate models
+            ranking = self._to_ranking_candidates(ext.top_candidates)
+
+            # Set-based correctness: predicted is in expected set
+            correct = (
+                ext.predicted_name in expected_set
+                if ext.predicted_name is not None
+                else False
+            )
+
+            # Best matching expected action for display (first found in candidates, else first in set)
+            matched_expected = (
+                ext.predicted_name
+                if ext.predicted_name in expected_set
+                else next(iter(expected_set), "")
+            )
+
+            results.append(
+                ActionEvaluation(
+                    extracted_action=ext.extracted_name,
+                    expected_action=matched_expected,
+                    predicted_action=ext.predicted_name,
+                    similarity_score=ext.similarity_score,
+                    correct=correct,
+                    expected_rank=expected_rank,
+                    top_candidates=ranking,
                 )
-            else:
-                results.append(
-                    ActionEvaluation(
-                        extracted_action=ext.extracted_name,
-                        expected_action=exp_name,
-                        predicted_action=ext.predicted_name,
-                        similarity_score=ext.similarity_score,
-                        correct=ext.predicted_name == exp_name
-                        if ext.predicted_name is not None
-                        else False,
-                    )
-                )
+            )
 
         return results
 
     def _evaluate_triggers(
         self,
         extracted: list[ExtractedTrigger],
-        expected_names: list[str],
+        expected_set: set[str],
     ) -> list[TriggerEvaluation]:
         results: list[TriggerEvaluation] = []
-        max_len = max(len(extracted), len(expected_names))
 
-        for i in range(max_len):
-            ext = extracted[i] if i < len(extracted) else None
-            exp_name = expected_names[i] if i < len(expected_names) else ""
+        for ext in extracted:
+            expected_rank = self._find_expected_rank(ext.top_candidates, expected_set)
+            ranking = self._to_ranking_candidates(ext.top_candidates)
 
-            if ext is None:
-                results.append(
-                    TriggerEvaluation(
-                        extracted_trigger="",
-                        expected_trigger=exp_name,
-                        predicted_trigger=None,
-                        similarity_score=None,
-                        correct=False,
-                    )
+            correct = (
+                ext.predicted_name in expected_set
+                if ext.predicted_name is not None
+                else False
+            )
+
+            matched_expected = (
+                ext.predicted_name
+                if ext.predicted_name in expected_set
+                else next(iter(expected_set), "")
+            )
+
+            results.append(
+                TriggerEvaluation(
+                    extracted_trigger=ext.extracted_name,
+                    expected_trigger=matched_expected,
+                    predicted_trigger=ext.predicted_name,
+                    similarity_score=ext.similarity_score,
+                    correct=correct,
+                    expected_rank=expected_rank,
+                    top_candidates=ranking,
                 )
-            else:
-                results.append(
-                    TriggerEvaluation(
-                        extracted_trigger=ext.extracted_name,
-                        expected_trigger=exp_name,
-                        predicted_trigger=ext.predicted_name,
-                        similarity_score=ext.similarity_score,
-                        correct=ext.predicted_name == exp_name
-                        if ext.predicted_name is not None
-                        else False,
-                    )
-                )
+            )
 
         return results
+
+    @staticmethod
+    def _find_expected_rank(candidates: list, expected_set: set[str]) -> int | None:
+        """
+        Return 1-based rank of the first candidate whose name is in expected_set.
+        Returns None if not found in the candidates list.
+        """
+        for rank, candidate in enumerate(candidates, start=1):
+            name = getattr(candidate, "name", None) or getattr(
+                getattr(candidate, "entity", None), "name", None
+            )
+            if name in expected_set:
+                return rank
+        return None
+
+    @staticmethod
+    def _to_ranking_candidates(candidates: list) -> list[RankingCandidate]:
+        """
+        Convert raw retriever RankedCandidate objects to RankingCandidate models.
+        Handles both RankedCandidate dataclass objects and plain dicts.
+        """
+        result = []
+        for c in candidates:
+            # Support RankedCandidate dataclass from app.retrieval.models
+            if hasattr(c, "entity"):
+                result.append(
+                    RankingCandidate(
+                        name=c.entity.name,
+                        rrf_score=float(c.rrf_score),
+                        vector_rank=c.vector_rank,
+                        bm25_rank=c.bm25_rank,
+                        postgres_rank=c.postgres_rank,
+                    )
+                )
+            elif isinstance(c, dict):
+                result.append(
+                    RankingCandidate(
+                        name=c.get("name", ""),
+                        rrf_score=float(c.get("rrf_score", 0.0)),
+                        vector_rank=c.get("vector_rank"),
+                        bm25_rank=c.get("bm25_rank"),
+                        postgres_rank=c.get("postgres_rank"),
+                    )
+                )
+        return result

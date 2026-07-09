@@ -29,15 +29,11 @@ class HybridRetriever:
         keyword_results = self.keyword.search_actions(query, limit=limit)
         postgress_results = self.postgress.search_actions(query, limit=limit)
 
-        return self.rrf.fuse(
-            [vector_results, keyword_results, postgress_results], limit=limit
-        )
+        return self.rrf.fuse(vector_results, keyword_results, postgress_results)
 
     def search_triggers(self, query: str, embedding, limit: int = 50):
         vector_results = self.vector.search_triggers(embedding, limit=limit)
         keyword_results = self.keyword.search_triggers(query, limit=limit)
         postgress_results = self.postgress.search_triggers(query, limit=limit)
 
-        return self.rrf.fuse(
-            [vector_results, keyword_results, postgress_results], limit=limit
-        )
+        return self.rrf.fuse(vector_results, keyword_results, postgress_results)

@@ -13,6 +13,24 @@ the ingestion pipeline, or the execution engine.
 from pydantic import BaseModel, Field
 
 
+class RankingCandidate(BaseModel):
+    """
+    A single candidate from the hybrid retriever with per-source rank breakdown.
+
+    name           — catalog name of the candidate
+    rrf_score      — fused Reciprocal Rank Fusion score
+    vector_rank    — rank from vector (embedding) retriever, None if not retrieved
+    bm25_rank      — rank from BM25 keyword retriever, None if not retrieved
+    postgres_rank  — rank from Postgres full-text retriever, None if not retrieved
+    """
+
+    name: str
+    rrf_score: float
+    vector_rank: int | None = None
+    bm25_rank: int | None = None
+    postgres_rank: int | None = None
+
+
 class ActionEvaluation(BaseModel):
     """
     Evaluation result for a single extracted action reference.
@@ -20,10 +38,13 @@ class ActionEvaluation(BaseModel):
     extracted_action  — the raw name extracted from the BRD by the LLM
     expected_action   — the canonical action name from the ground truth dataset
     predicted_action  — the action name the embedding mapper matched in the catalog
-                        (may be None if no match was found)
-    similarity_score  — cosine similarity score from the embedding mapper (0.0–1.0)
+                        (None if no match was found)
+    similarity_score  — RRF score of the top candidate (0.0–1.0)
                         None if no match was attempted or found
-    correct           — True if predicted_action == expected_action
+    correct           — True if predicted_action is in the expected set
+    expected_rank     — rank at which the expected action appeared in the
+                        retriever candidates list (None if not found in top-N)
+    top_candidates    — ranked list of top-N retriever candidates with score breakdown
     """
 
     extracted_action: str
@@ -31,6 +52,8 @@ class ActionEvaluation(BaseModel):
     predicted_action: str | None
     similarity_score: float | None
     correct: bool
+    expected_rank: int | None = None
+    top_candidates: list[RankingCandidate] = Field(default_factory=list)
 
 
 class TriggerEvaluation(BaseModel):
@@ -40,10 +63,13 @@ class TriggerEvaluation(BaseModel):
     extracted_trigger  — the raw name extracted from the BRD by the LLM
     expected_trigger   — the canonical trigger name from the ground truth dataset
     predicted_trigger  — the trigger name the embedding mapper matched in the catalog
-                         (may be None if no match was found)
-    similarity_score   — cosine similarity score from the embedding mapper (0.0–1.0)
+                         (None if no match was found)
+    similarity_score   — RRF score of the top candidate (0.0–1.0)
                          None if no match was attempted or found
-    correct            — True if predicted_trigger == expected_trigger
+    correct            — True if predicted_trigger is in the expected set
+    expected_rank      — rank at which the expected trigger appeared in the
+                         retriever candidates list (None if not found in top-N)
+    top_candidates     — ranked list of top-N retriever candidates with score breakdown
     """
 
     extracted_trigger: str
@@ -51,6 +77,8 @@ class TriggerEvaluation(BaseModel):
     predicted_trigger: str | None
     similarity_score: float | None
     correct: bool
+    expected_rank: int | None = None
+    top_candidates: list[RankingCandidate] = Field(default_factory=list)
 
 
 class WorkflowEvaluation(BaseModel):
@@ -74,12 +102,14 @@ class EvaluationReport(BaseModel):
     total_workflows      — number of workflows evaluated
     total_actions        — total action evaluations across all workflows
     total_triggers       — total trigger evaluations across all workflows
-    action_accuracy      — fraction of actions where predicted == expected (0.0–1.0)
-    trigger_accuracy     — fraction of triggers where predicted == expected (0.0–1.0)
-    average_similarity   — mean similarity score across all evaluated mappings
+    action_accuracy      — fraction of actions where predicted is in the expected set (0.0–1.0)
+    trigger_accuracy     — fraction of triggers where predicted is in the expected set (0.0–1.0)
+    average_similarity   — mean RRF score of the top candidate across all mappings
                            (excludes entries where similarity_score is None)
     unknown_actions      — count of actions where predicted_action is None
     unknown_triggers     — count of triggers where predicted_trigger is None
+    mean_reciprocal_rank_actions   — MRR across all action queries (0.0–1.0)
+    mean_reciprocal_rank_triggers  — MRR across all trigger queries (0.0–1.0)
     workflow_results     — per-workflow breakdown
     """
 
@@ -91,4 +121,6 @@ class EvaluationReport(BaseModel):
     average_similarity: float
     unknown_actions: int
     unknown_triggers: int
+    mean_reciprocal_rank_actions: float = 0.0
+    mean_reciprocal_rank_triggers: float = 0.0
     workflow_results: list[WorkflowEvaluation] = Field(default_factory=list)
