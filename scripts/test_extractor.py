@@ -45,11 +45,17 @@ from app.models.workflow_action_mapping import WorkflowActionMapping
 from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.action_definitions import ActionDefinition
 from app.models.trigger_definitions import TriggerDefinition
+from app.retrieval.pipeline import RetrievalPipeline
 from app.retrieval.hybrid_retriever import HybridRetriever
 from app.retrieval.vector_retriever import VectorRetriever
 from app.retrieval.keyword_retriever import KeywordRetriever
 from app.retrieval.postgress_retriever import PostgressRetriever
 from app.retrieval.reciprocal_rank_fusion import ReciprocalRankFusion
+from app.retrieval.cross_encoder import CrossEncoderReRanker
+from app.retrieval.decision_engine import MappingDecisionEngine
+from app.retrieval.confidene_estimator import ConfidenceEstimator
+from app.retrieval.thresholds import RetrievalThresholds
+from app.retrieval.unknown_detector import UnkownDetetor
 
 from app.evaluation.evaluator import Evaluator, ExpectedWorkflow, ExtractedAction, ExtractedTrigger
 from app.evaluation.report import print_report
@@ -186,13 +192,25 @@ GROUND_TRUTH: list[ExpectedWorkflow] = [
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _build_hybrid_retriever(repo: WorkflowRepository) -> HybridRetriever:
-    return HybridRetriever(
+def _build_pipeline(repo: WorkflowRepository) -> RetrievalPipeline:
+    """Build the full retrieval pipeline with all dependencies injected."""
+    return RetrievalPipeline(
         vector_retriever=VectorRetriever(repo),
         keyword_retriever=KeywordRetriever(repo),
-        postgress_retriever=PostgressRetriever(repo),
+        postgres_retriever=PostgressRetriever(repo),
         rrf=ReciprocalRankFusion(),
+        cross_encoder=CrossEncoderReRanker(),
+        decision_engine=MappingDecisionEngine(
+            confidene_estimator=ConfidenceEstimator(),
+            thresholds=RetrievalThresholds(),
+            unknown_detector=UnkownDetetor(),
+        ),
     )
+
+
+def _build_hybrid_retriever(repo: WorkflowRepository) -> HybridRetriever:
+    """Build HybridRetriever (embedding model + pipeline) for evaluation re-runs."""
+    return HybridRetriever(pipeline=_build_pipeline(repo))
 
 
 def _read_text_file(path: Path) -> str:
@@ -216,8 +234,8 @@ def run_ingestion(doc_path: Path) -> int:
     try:
         workflow_extractor = WorkflowExtractor()
         repository = WorkflowRepository(db)
-        hybrid = _build_hybrid_retriever(repository)
-        embedding_mapper = EmbeddingMapper(repository, hybrid)
+        pipeline = _build_pipeline(repository)
+        embedding_mapper = EmbeddingMapper(repository, pipeline)
 
         suffix = doc_path.suffix.lower()
 

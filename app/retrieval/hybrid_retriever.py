@@ -1,39 +1,55 @@
-from .vector_retriever import VectorRetriever
-from .keyword_retriever import KeywordRetriever
-from .reciprocal_rank_fusion import ReciprocalRankFusion
-from .postgress_retriever import PostgressRetriever
+"""
+app/retrieval/hybrid_retriever.py
+
+HybridRetriever — owns the embedding model and delegates retrieval to RetrievalPipeline.
+
+Responsibilities:
+  - embed()  : encode a text string into a dense vector
+  - search_actions / search_triggers : thin pass-through to RetrievalPipeline
+    (kept for backward compatibility with evaluation's ranking re-run)
+
+The retrieval orchestration (vector + BM25 + Postgres + RRF + cross-encoder +
+decision) lives entirely in RetrievalPipeline. HybridRetriever does not
+duplicate any of that logic.
+"""
+
 from sentence_transformers import SentenceTransformer
 
+from .pipeline import RetrievalPipeline
+from .models import RankedCandidate
 
 
 class HybridRetriever:
+    """
+    Thin wrapper that bundles the embedding model with a RetrievalPipeline.
+
+    EmbeddingMapper uses RetrievalPipeline directly.
+    Evaluation (test_extractor) uses HybridRetriever.embed() + pipeline.retrieve_*()
+    for the ranking breakdown re-run.
+    """
+
     def __init__(
         self,
-        vector_retriever: VectorRetriever,
-        keyword_retriever: KeywordRetriever,
-        postgress_retriever: PostgressRetriever,
-        rrf: ReciprocalRankFusion,
+        pipeline: RetrievalPipeline,
+        model_name: str = "BAAI/bge-small-en-v1.5",
     ):
-        self.vector = vector_retriever
-        self.keyword = keyword_retriever
-        self.postgress = postgress_retriever
-        self.rrf = rrf
-        self.model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-    
+        self.pipeline = pipeline
+        self.model = SentenceTransformer(model_name)
+
     def embed(self, text: str) -> list[float]:
         vector = self.model.encode(text, normalize_embeddings=True)
         return vector.tolist()
 
-    def search_actions(self, query: str, embedding, limit: int = 50):
-        vector_results = self.vector.search_actions(embedding, limit=limit)
-        keyword_results = self.keyword.search_actions(query, limit=limit)
-        postgress_results = self.postgress.search_actions(query, limit=limit)
+    # ── Pass-throughs used by evaluation ranking re-run ───────────────────────
 
-        return self.rrf.fuse(vector_results, keyword_results, postgress_results)
+    def search_actions(
+        self, query: str, embedding: list[float], limit: int = 50
+    ) -> list[RankedCandidate]:
+        """Return full candidate list (no decision filter) — used by evaluation."""
+        return self.pipeline.retrieve_actions(query, embedding, limit=limit)
 
-    def search_triggers(self, query: str, embedding, limit: int = 50):
-        vector_results = self.vector.search_triggers(embedding, limit=limit)
-        keyword_results = self.keyword.search_triggers(query, limit=limit)
-        postgress_results = self.postgress.search_triggers(query, limit=limit)
-
-        return self.rrf.fuse(vector_results, keyword_results, postgress_results)
+    def search_triggers(
+        self, query: str, embedding: list[float], limit: int = 50
+    ) -> list[RankedCandidate]:
+        """Return full candidate list (no decision filter) — used by evaluation."""
+        return self.pipeline.retrieve_triggers(query, embedding, limit=limit)
