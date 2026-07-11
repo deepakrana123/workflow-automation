@@ -18,12 +18,7 @@ class LLMManager:
     # ------------------------------------------------------------------ #
 
     def generate(self, prompt: str) -> dict:
-        """
-        Try providers in order (ollama → gemini).
-        Skips providers that are currently disabled by health tracking.
-        Returns the first successful result.
-        Raises RuntimeError if all providers fail or are unhealthy.
-        """
+     
         last_error = "no healthy providers available"
 
         for provider_name, provider_fn in self.providers:
