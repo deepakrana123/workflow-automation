@@ -3,11 +3,14 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.nlp.prompts.prompt_registry import registry
-from app.nlp.prompts.prompt_version_store import version_store
+from app.prompting.prompt_registry import PromptRegistry
+from app.prompting.prompt_version_store import version_store
 from app.repositories import generation_log_repo
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
+
+# Module-level registry instance for route handlers
+registry = PromptRegistry()
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────

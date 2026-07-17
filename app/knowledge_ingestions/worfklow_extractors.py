@@ -4,9 +4,7 @@ from app.nlp.llm_manager.providers.gemini_rest import try_call_gemini_rest
 from app.knowledge_ingestions.schemas import WorkflowExtraction
 from app.knowledge_ingestions.exceptions import WorkflowExtractionError
 
-from app.prompting.prompt_manager import PromptManager
-from app.prompting.prompt_context import PromptContext
-from app.prompting.prompt_registry import PromptKey
+from app.prompting import PromptManager, PromptContext, PromptKey
 
 
 class WorkflowExtractor:

@@ -25,8 +25,7 @@ from app.nlp.catalog.matcher import CatalogMatcher
 from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
 from app.nlp.catalog.actionRepository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
-from app.nlp.prompts.builder import PromptBuilder
-from app.nlp.prompts.prompt_context import PromptContext
+from app.prompting import PromptManager, PromptContext, PromptKey
 from app.semantic.semantic_catalog_retriever import SemanticCatalogRetriever
 
 
@@ -160,12 +159,14 @@ def run_case(case_id: str, user_request: str, expected: str, domain: str, note: 
             return False
 
         context = PromptContext(
-            workflow_type=result.workflow_type,
-            triggers=[t.name for t in result.matched_triggers],
-            actions=[a.name for a in result.matched_actions],
-            user_request=user_request,
+            variables={
+                "workflow_type": result.workflow_type or "general",
+                "triggers": "\n".join(t.name for t in result.matched_triggers),
+                "actions": "\n".join(a.name for a in result.matched_actions),
+                "user_request": user_request,
+            }
         )
-        build_result = PromptBuilder().build(context)
+        build_result = PromptManager().build_with_metadata(PromptKey.WORKFLOW_GENERATION, context)
         if verbose:
             print(f"       prompt   : version={build_result.version}  ~{build_result.estimated_tokens} tokens")
 

@@ -1,10 +1,17 @@
 """
 app/prompts/__init__.py
 
-Loads prompt templates from .md files in this directory.
+Prompt template files live in this directory as .md files.
 
-Each prompt is exposed as a plain string ready for .format() calls.
-The .md files use {placeholder} syntax for variable substitution.
+DEPRECATED: Importing prompt constants from this module is deprecated.
+Use the PromptManager API instead:
+
+    from app.prompting import PromptManager, PromptContext, PromptKey
+
+    pm = PromptManager()
+    prompt = pm.build(PromptKey.WORKFLOW_EXTRACTION, PromptContext(variables={...}))
+
+The module-level constants below are kept temporarily for backward compatibility.
 """
 
 from pathlib import Path
@@ -17,4 +24,5 @@ def _load(filename: str) -> str:
     return (_DIR / filename).read_text(encoding="utf-8")
 
 
+# Backward-compatible constant — prefer PromptManager.build() in new code
 WORKFLOW_EXTRACTION_PROMPT: str = _load("extractor.md")

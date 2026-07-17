@@ -1,3 +1,11 @@
+"""
+DEPRECATED: Evaluation repository placeholder.
+
+This shim exists for backward compatibility.
+"""
+
+
 class PromptEvalutionRepository:
-    def save(self, evalution):
-        print(evalution)
+    """DEPRECATED: Placeholder — migrate to proper eval logging."""
+    def save(self, evaluation):
+        print(evaluation)

@@ -19,7 +19,7 @@ from app.nlp.catalog.matcher import CatalogMatcher
 from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
 from app.nlp.catalog.actionRepository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
-from app.nlp.prompts.builder import PromptBuilder
+from app.prompting import PromptManager
 from app.nlp.llm_manager.llm_manager import LLMManager
 from app.nlp.services.nl_workflow_service import NLPWorkflowService
 
@@ -62,7 +62,7 @@ def _build_nlp_service(db: Session) -> NLPWorkflowService:
             SemanticCatalogRetriever(),
         ),
         suitability_agent=SuitabilityAgent(),
-        prompt_builder=PromptBuilder(),
+        prompt_manager=PromptManager(),
         workflow_generator=WorkflowGenerator(
             llm_manager=LLMManager(),
             response_parse=WorkflowResponseParser(),
