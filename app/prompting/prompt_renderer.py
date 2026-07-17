@@ -1,9 +1,8 @@
 from app.prompting.prompt_context import PromptContext
 
+
 class PromptRenderer:
-    def render(
-        self,template:str,context:PromptContext
-    )->str:
+    def render(self, template: str, context: PromptContext) -> str:
         try:
             return template.format(**context.variables)
         except KeyError as exc:
