@@ -1,59 +1,41 @@
 """
-app/nlp/prompts/builder.py
+DEPRECATED: Moved to app.prompting.prompt_manager
 
-Builds the final prompt string from a PromptContext.
+This shim exists for backward compatibility. Import from app.prompting instead.
 
-Uses the active version from PromptVersionStore.
-Returns a PromptBuildResult with the prompt text, version used,
-and estimated token count — so callers can log all three.
+    from app.prompting import PromptManager, PromptBuildResult
 """
+from app.prompting.prompt_manager import PromptBuildResult  # noqa: F401
 
-from dataclasses import dataclass
-from app.nlp.prompts.prompt_context import PromptContext
-from app.nlp.prompts.prompt_registry import registry
-from app.nlp.prompts.prompt_version_store import version_store
-from app.nlp.prompts.token_estimator import estimate_tokens
-
+# Legacy constant kept for scripts that reference it
 PROMPT_NAME = "workflow_generation"
 
 
-@dataclass
-class PromptBuildResult:
-    prompt: str
-    prompt_name: str
-    version: str
-    estimated_tokens: int
-
-
 class PromptBuilder:
+    """
+    DEPRECATED: Use PromptManager instead.
 
-    def build(self, context: PromptContext) -> PromptBuildResult:
-        """
-        Build the final prompt for the given context.
+    Thin wrapper that delegates to the unified PromptManager
+    so old callers continue to work without changes.
+    """
 
-        Reads the active version from PromptVersionStore,
-        loads the template from PromptRegistry,
-        interpolates context fields,
-        estimates token count.
+    def __init__(self):
+        from app.prompting import PromptManager, PromptKey
+        self._pm = PromptManager()
+        self._key = PromptKey.WORKFLOW_GENERATION
 
-        Returns PromptBuildResult — never a bare string.
-        """
-        version = version_store.get_active(PROMPT_NAME)
-        prompt_version = registry.get(PROMPT_NAME, version)
+    def build(self, context) -> PromptBuildResult:
+        from app.prompting import PromptContext as NewContext
 
-        trigger_block = "\n".join(context.triggers)
-        action_block = "\n".join(context.actions)
+        # Adapt old-style PromptContext (with typed fields) to new generic one
+        if hasattr(context, "variables"):
+            new_ctx = context
+        else:
+            new_ctx = NewContext(variables={
+                "workflow_type": context.workflow_type or "general",
+                "triggers": "\n".join(context.triggers),
+                "actions": "\n".join(context.actions),
+                "user_request": context.user_request,
+            })
 
-        prompt = prompt_version.template.format(
-            workflow_type=context.workflow_type or "general",
-            triggers=trigger_block,
-            actions=action_block,
-            user_request=context.user_request,
-        )
-
-        return PromptBuildResult(
-            prompt=prompt,
-            prompt_name=PROMPT_NAME,
-            version=version,
-            estimated_tokens=estimate_tokens(prompt),
-        )
+        return self._pm.build_with_metadata(self._key, new_ctx)

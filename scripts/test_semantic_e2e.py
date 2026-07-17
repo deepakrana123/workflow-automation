@@ -33,8 +33,7 @@ from app.nlp.catalog.matcher import CatalogMatcher
 from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
 from app.nlp.catalog.actionRepository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
-from app.nlp.prompts.builder import PromptBuilder
-from app.nlp.prompts.prompt_context import PromptContext
+from app.prompting import PromptManager, PromptContext, PromptKey
 from app.nlp.llm_manager.llm_manager import LLMManager
 from app.workflow.workflow_response_parser import WorkflowResponseParser
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
@@ -515,12 +514,14 @@ def run_case(case: E2ECase, verbose: bool) -> bool:
         print(f"  [2] Suitability ✓  type={catalog.workflow_type}")
 
         context = PromptContext(
-            workflow_type=catalog.workflow_type,
-            triggers=[t.name for t in catalog.matched_triggers],
-            actions=[a.name for a in catalog.matched_actions],
-            user_request=case.user_request,
+            variables={
+                "workflow_type": catalog.workflow_type or "general",
+                "triggers": "\n".join(t.name for t in catalog.matched_triggers),
+                "actions": "\n".join(a.name for a in catalog.matched_actions),
+                "user_request": case.user_request,
+            }
         )
-        prompt_result = PromptBuilder().build(context)
+        prompt_result = PromptManager().build_with_metadata(PromptKey.WORKFLOW_GENERATION, context)
         llm_result = LLMManager().generate(prompt_result.prompt)
 
         if not llm_result["success"]:

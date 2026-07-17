@@ -1,11 +1,6 @@
-from dataclasses import dataclass, field
+"""
+DEPRECATED: Moved to app.prompting.prompt_context
 
-
-@dataclass
-class PromptContext:
-    workflow_type: str | None
-    triggers: list[str]
-    actions: list[str]
-    user_request: str
-    semantic_triggers: list[dict] = field(default_factory=list)
-    semantic_actions: list[dict] = field(default_factory=list)
+This shim exists for backward compatibility. Import from app.prompting instead.
+"""
+from app.prompting.prompt_context import PromptContext  # noqa: F401

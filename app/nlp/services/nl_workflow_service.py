@@ -15,9 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.nlp.catalog.matcher import CatalogMatcher
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
-from app.nlp.prompts.builder import PromptBuilder, PROMPT_NAME
-from app.nlp.prompts.prompt_context import PromptContext
-from app.nlp.prompts.prompt_version_store import version_store
+from app.prompting import PromptManager, PromptContext, PromptKey
+from app.prompting.prompt_version_store import version_store
 from app.workflow.workflow_generator import WorkflowGenerator
 from app.workflow.workflow_schema_validator import WorkflowSchemaValidator
 from app.workflow.workflow_validator import WorkflowValidator
@@ -36,7 +35,7 @@ class NLPWorkflowService:
         self,
         catalog_matcher: CatalogMatcher,
         suitability_agent: SuitabilityAgent,
-        prompt_builder: PromptBuilder,
+        prompt_manager: PromptManager,
         workflow_generator: WorkflowGenerator,
         schema_validator: WorkflowSchemaValidator,
         workflow_validator: WorkflowValidator,
@@ -47,7 +46,7 @@ class NLPWorkflowService:
     ):
         self.catalog_matcher = catalog_matcher
         self.suitability_agent = suitability_agent
-        self.prompt_builder = prompt_builder
+        self.prompt_manager = prompt_manager
         self.workflow_generator = workflow_generator
         self.schema_validator = schema_validator
         self.workflow_validator = workflow_validator
@@ -73,13 +72,17 @@ class NLPWorkflowService:
             raise ValueError(suitability.reason)
 
         context = PromptContext(
-            workflow_type=workflow_type,
-            triggers=[t.name for t in catalog_result.matched_triggers],
-            actions=[a.name for a in catalog_result.matched_actions],
-            user_request=user_request,
+            variables={
+                "workflow_type": workflow_type or "general",
+                "triggers": "\n".join(t.name for t in catalog_result.matched_triggers),
+                "actions": "\n".join(a.name for a in catalog_result.matched_actions),
+                "user_request": user_request,
+            }
         )
 
-        build_result = self.prompt_builder.build(context)
+        build_result = self.prompt_manager.build_with_metadata(
+            PromptKey.WORKFLOW_GENERATION, context
+        )
         prompt = build_result.prompt
         prompt_name = build_result.prompt_name
         prompt_version = build_result.version

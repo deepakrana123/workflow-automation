@@ -1,16 +1,9 @@
-from dataclasses import dataclass
+"""
+DEPRECATED: Moved to app.prompting.prompt_version
 
+This shim exists for backward compatibility. Import from app.prompting instead.
+"""
+from app.prompting.prompt_version import PromptVersion  # noqa: F401
 
-@dataclass
-class PromptVersion:
-    """
-    Represents a single versioned prompt template.
-
-    Attributes:
-        name:     Prompt identifier, e.g. "workflow_generation"
-        version:  Version string, e.g. "v1", "v2"
-        template: Full template text loaded from disk
-    """
-    name: str
-    version: str
-    template: str
+# Typo-compat alias (was in original code)
+PropmptVersion = PromptVersion

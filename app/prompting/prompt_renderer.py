@@ -1,3 +1,12 @@
+"""
+app/prompting/prompt_renderer.py
+
+Template + Variables → Rendered Prompt.
+
+Validates that all required variables are present and raises
+clear errors when they are missing.
+"""
+
 from app.prompting.prompt_context import PromptContext
 
 
