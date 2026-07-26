@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+
 from app.models.action_configurations_model import ActionConfiguration
 
 
@@ -29,11 +30,29 @@ class ActionConfigurationRepository:
         workflow_knowledge_id: int,
         action_definition_id: int,
     ) -> ActionConfiguration | None:
-        # Bug fix: .first() was inside the filter chain — moved outside correctly
         return (
             self.db.query(ActionConfiguration)
             .filter(
                 ActionConfiguration.workflow_knowledge_id == workflow_knowledge_id,
+                ActionConfiguration.action_definition_id == action_definition_id,
+                ActionConfiguration.active.is_(True),
+            )
+            .order_by(ActionConfiguration.version.desc())
+            .first()
+        )
+
+    def get_by_action_definition(
+        self,
+        action_definition_id: int,
+    ) -> ActionConfiguration | None:
+        """
+        Lookup by action_definition_id only — used by step_executor when
+        workflow_knowledge_id is not available on the runtime Workflow model.
+        Returns the latest active version.
+        """
+        return (
+            self.db.query(ActionConfiguration)
+            .filter(
                 ActionConfiguration.action_definition_id == action_definition_id,
                 ActionConfiguration.active.is_(True),
             )

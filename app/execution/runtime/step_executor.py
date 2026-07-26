@@ -1,40 +1,104 @@
+import time
 import traceback
+
 from app.execution.runtime.step_execution_service import (
-    mark_step_running,
+    create_step_execution,
     mark_step_completed,
     mark_step_failed,
-    create_step_execution,
+    mark_step_running,
 )
-from app.execution.dispatcher import execute_action
+from app.execution.executors.registry import ExecutorRegistry
 from app.execution.retry_handler import handle_retry
-from app.workflow_execution.schemas.action_result import ActionResult
+from app.models.action_definitions import ActionDefinition
+from app.repositories.action_configuration_repository import ActionConfigurationRepository
 from app.repositories.step_retry_history_repo import record_retry_history
-from app.core.tracing import generate_span_id, inject_trace_into_payload, build_log_context
-from app.services import trace_service
+from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
+from app.core.tracing import build_log_context, generate_span_id, inject_trace_into_payload
+from app.services import trace_service
 
 
-# Checkpoint labels — every major operation inside execute_workflow_step
-# gets a checkpoint so the except block can tell you exactly where it crashed
-_CP_INIT            = "init"
-_CP_CREATE_STEP     = "create_step_execution"
-_CP_MARK_RUNNING    = "mark_step_running"
-_CP_TRACE_STARTED   = "record_step_started"
-_CP_INJECT_TRACE    = "inject_trace_into_payload"
-_CP_DISPATCH        = "execute_action"
-_CP_MARK_COMPLETED  = "mark_step_completed"
-_CP_MARK_FAILED     = "mark_step_failed"
-_CP_RETRY           = "handle_retry"
+# ── Checkpoint labels ─────────────────────────────────────────────────────────
+_CP_INIT           = "init"
+_CP_CREATE_STEP    = "create_step_execution"
+_CP_MARK_RUNNING   = "mark_step_running"
+_CP_TRACE_STARTED  = "record_step_started"
+_CP_INJECT_TRACE   = "inject_trace_into_payload"
+_CP_LOAD_CONFIG    = "load_action_configuration"
+_CP_DISPATCH       = "execute_action"
+_CP_MARK_COMPLETED = "mark_step_completed"
+_CP_MARK_FAILED    = "mark_step_failed"
+_CP_RETRY          = "handle_retry"
 
 
-def execute_workflow_step(db, workflow_execution, step_definition, payload):
+def _load_action_configuration(
+    db,
+    action_name: str,
+    workflow_knowledge_id: int | None,
+):
+    """
+    Load ActionConfiguration using (workflow_knowledge_id, action_definition_id)
+    when workflow_knowledge_id is available, otherwise fall back to action_definition_id
+    alone.
 
+    Returns (ActionConfiguration | None, execution_type: str)
+    """
+    try:
+        action_def = (
+            db.query(ActionDefinition)
+            .filter(
+                ActionDefinition.name == action_name,
+                ActionDefinition.active.is_(True),
+            )
+            .first()
+        )
+
+        if action_def is None:
+            return None, "python"
+
+        repo = ActionConfigurationRepository(db)
+
+        if workflow_knowledge_id is not None:
+            # Primary path: exact lookup by (workflow_knowledge_id, action_definition_id)
+            action_config = repo.get_active_configuration(
+                workflow_knowledge_id=workflow_knowledge_id,
+                action_definition_id=action_def.id,
+            )
+        else:
+            # Fallback: lookup by action_definition_id only
+            action_config = repo.get_by_action_definition(
+                action_definition_id=action_def.id,
+            )
+
+        if action_config is None:
+            return None, "python"
+
+        return action_config, action_config.execution_type or "python"
+
+    except Exception as e:
+        logger.warning(
+            "step_executor_config_lookup_failed",
+            extra={"extra_data": {
+                "action_name": action_name,
+                "workflow_knowledge_id": workflow_knowledge_id,
+                "error": str(e),
+            }},
+        )
+        return None, "python"
+
+
+def execute_workflow_step(
+    db,
+    workflow_execution,
+    step_definition: dict,
+    payload: dict,
+    workflow_knowledge_id: int | None = None,
+):
     step_execution = None
-    checkpoint     = _CP_INIT   # tracks last successfully passed checkpoint
+    checkpoint     = _CP_INIT
 
     try:
         action  = step_definition.get("action")
-        config  = step_definition.get("config", {})
         step_id = step_definition.get("id", "unknown")
 
         span_id        = generate_span_id()
@@ -46,11 +110,11 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                 "extra_data": build_log_context(
                     workflow_execution=workflow_execution,
                     extra={
-                        "step_id": step_id,
-                        "action": action,
-                        "span_id": span_id,
+                        "step_id":        step_id,
+                        "action":         action,
+                        "span_id":        span_id,
                         "parent_span_id": str(parent_span_id) if parent_span_id else None,
-                        "payload_keys": list(payload.keys()) if payload else [],
+                        "payload_keys":   list(payload.keys()) if payload else [],
                     },
                 )
             },
@@ -106,17 +170,80 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
             action_name=action,
         )
 
+        # ── CHECKPOINT: load_action_configuration ────────────────────────────
+        checkpoint = _CP_LOAD_CONFIG
+        action_config, execution_type = _load_action_configuration(
+            db=db,
+            action_name=action,
+            workflow_knowledge_id=workflow_knowledge_id,
+        )
+
+        logger.info(
+            "step_execution_dispatch_mode",
+            extra={"extra_data": {
+                "action":                action,
+                "execution_type":        execution_type,
+                "has_action_config":     action_config is not None,
+                "workflow_knowledge_id": workflow_knowledge_id,
+            }},
+        )
+
         # ── CHECKPOINT: execute_action ────────────────────────────────────────
         checkpoint = _CP_DISPATCH
-        result  = execute_action(action_name=action, payload=traced_payload, config=config)
-        success = result.success
+
+        if action_config is not None:
+            executor      = ExecutorRegistry.get_executor(execution_type)
+            executor_name = type(executor).__name__
+
+            _t0 = time.perf_counter()
+            result = executor.execute(
+                configuration=action_config,
+                context=traced_payload,
+            )
+            duration_ms = round((time.perf_counter() - _t0) * 1000, 2)
+
+            logger.info(
+                "execution_log",
+                extra={"extra_data": {
+                    "workflow_id":            getattr(workflow_execution, "workflow_id", None),
+                    "workflow_knowledge_id":  workflow_knowledge_id,
+                    "action_definition_id":   action_config.action_definition_id,
+                    "execution_type":         execution_type,
+                    "executor":               executor_name,
+                    "duration_ms":            duration_ms,
+                    "success":                result.success,
+                    "error":                  result.error if not result.success else None,
+                }},
+            )
+        else:
+            # No ActionConfiguration found — step cannot be executed.
+            # Return a non-retryable failure so the DAG can halt cleanly.
+            logger.error(
+                "step_executor_no_action_configuration",
+                extra={"extra_data": {
+                    "action":                action,
+                    "workflow_knowledge_id": workflow_knowledge_id,
+                }},
+            )
+            result = ActionResult(
+                success=False,
+                error=(
+                    f"No ActionConfiguration found for action '{action}' "
+                    f"(workflow_knowledge_id={workflow_knowledge_id})"
+                ),
+                metadata={"skip_retry": True},
+            )
+
+        success    = result.success
         skip_retry = result.metadata.get("skip_retry", False)
 
         if success:
             # ── CHECKPOINT: mark_step_completed ──────────────────────────────
             checkpoint = _CP_MARK_COMPLETED
             mark_step_completed(
-                db=db, step_execution=step_execution, output_payload=result.model_dump()
+                db=db,
+                step_execution=step_execution,
+                output_payload=result.model_dump(),
             )
 
             trace_service.record_action_success(
@@ -198,9 +325,6 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
         return {"success": False, "result": result.model_dump()}
 
     except Exception as e:
-        # ── DIAGNOSTIC LOG — tells you exactly where the crash happened ───────
-        # checkpoint = last operation that was entered before the exception
-        # This is the key field for drilling into the error
         logger.error(
             "step_execution_failed",
             extra={
@@ -209,28 +333,17 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                         workflow_execution=workflow_execution,
                         execution_step=step_execution,
                     ),
-                    # WHERE it crashed
-                    "failed_at_checkpoint": checkpoint,
-
-                    # WHAT the error is
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-
-                    # FULL traceback — exact line number
-                    "traceback": traceback.format_exc(),
-
-                    # WHAT was being processed
-                    "step_id": step_definition.get("id", "unknown"),
-                    "action": step_definition.get("action"),
-
-                    # PAYLOAD shape — not full payload to avoid log bloat
-                    "payload_keys": list(payload.keys()) if payload else [],
-                    "payload_has_trace": "_trace" in (payload or {}),
-
-                    # STEP state at time of crash
-                    "step_execution_id": getattr(step_execution, "id", None),
-                    "step_status": getattr(step_execution, "status", None),
-                    "span_id": getattr(step_execution, "span_id", None),
+                    "failed_at_checkpoint":  checkpoint,
+                    "error":                 str(e),
+                    "error_type":            type(e).__name__,
+                    "traceback":             traceback.format_exc(),
+                    "step_id":               step_definition.get("id", "unknown"),
+                    "action":                step_definition.get("action"),
+                    "payload_keys":          list(payload.keys()) if payload else [],
+                    "payload_has_trace":     "_trace" in (payload or {}),
+                    "step_execution_id":     getattr(step_execution, "id", None),
+                    "step_status":           getattr(step_execution, "status", None),
+                    "span_id":               getattr(step_execution, "span_id", None),
                 }
             },
         )
@@ -238,7 +351,9 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
         if step_execution:
             if step_execution.status not in ("FAILED", "RETRY_SCHEDULED", "DLQ", "COMPLETED"):
                 try:
-                    mark_step_failed(db=db, step_execution=step_execution, error=str(e))
+                    mark_step_failed(
+                        db=db, step_execution=step_execution, error=str(e)
+                    )
                     trace_service.record_step_failed(
                         db=db,
                         workflow_execution=workflow_execution,
@@ -260,16 +375,15 @@ def execute_workflow_step(db, workflow_execution, step_definition, payload):
                         error=str(e),
                     )
                 except Exception as cleanup_err:
-                    # Log cleanup failure separately — don't mask original error
                     logger.error(
                         "step_execution_cleanup_failed",
                         extra={
                             "extra_data": {
-                                "step_execution_id": getattr(step_execution, "id", None),
+                                "step_execution_id":   getattr(step_execution, "id", None),
                                 "original_checkpoint": checkpoint,
-                                "cleanup_error": str(cleanup_err),
-                                "cleanup_error_type": type(cleanup_err).__name__,
-                                "cleanup_traceback": traceback.format_exc(),
+                                "cleanup_error":       str(cleanup_err),
+                                "cleanup_error_type":  type(cleanup_err).__name__,
+                                "cleanup_traceback":   traceback.format_exc(),
                             }
                         },
                     )

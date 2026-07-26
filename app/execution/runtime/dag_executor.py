@@ -10,14 +10,14 @@ def run_dag_execution(
     workflow_execution,
     dag,
     payload,
+    workflow_knowledge_id: int | None = None,
 ):
     steps = dag.get("steps", [])
 
     completed_steps = set()
-    failed_steps = set()
+    failed_steps    = set()
 
     # WorkflowContext accumulates outputs from every completed step.
-    # Future Decision Nodes will read from context.outputs to branch.
     context = WorkflowContext()
 
     while True:
@@ -42,16 +42,18 @@ def run_dag_execution(
                         workflow_execution=workflow_execution,
                         step_definition=step,
                         payload=payload,
+                        workflow_knowledge_id=workflow_knowledge_id,
                     ),
                 }
             ]
 
-        # Parallel path — each branch gets the same context instance
+        # Parallel path
         else:
             results = execute_parallel_steps(
                 workflow_execution_id=workflow_execution.id,
                 ready_steps=ready_steps,
                 payload=payload,
+                workflow_knowledge_id=workflow_knowledge_id,
             )
 
         workflow_failed = False
@@ -63,12 +65,10 @@ def run_dag_execution(
             if result["success"]:
                 completed_steps.add(step_id)
 
-                # Merge step outputs into shared WorkflowContext
                 action_result = result.get("result")
                 if action_result and hasattr(action_result, "outputs"):
                     context.update(action_result.outputs)
                 elif isinstance(action_result, dict):
-                    # Legacy dict result — merge everything except control keys
                     outputs = {
                         k: v for k, v in action_result.items()
                         if k not in ("success", "status", "skip_retry", "message", "error")

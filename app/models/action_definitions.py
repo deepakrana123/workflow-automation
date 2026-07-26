@@ -7,37 +7,97 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.sql import func
+
+from pgvector.sqlalchemy import Vector
 
 from app.db.base import Base
 
-from pgvector.sqlalchemy import Vector
 
 class ActionDefinition(Base):
     __tablename__ = "action_definitions"
 
     id = Column(Integer, primary_key=True)
 
-    name = Column(String, nullable=False, unique=True)
+    name = Column(
+        String,
+        nullable=False,
+        unique=True,
+    )
 
-    display_name = Column(String, nullable=False)
+    display_name = Column(
+        String,
+        nullable=False,
+    )
 
     description = Column(Text)
 
-    workflow_type = Column(String, nullable=False)
+    workflow_type = Column(
+        String,
+        nullable=False,
+    )
 
-    aliases = Column(JSONB, nullable=False, default=list)
+    aliases = Column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
 
-    config_schema = Column(JSONB)
+    # Input payload contract
+    input_schema = Column(
+        JSONB,
+        nullable=True,
+    )
 
-    active = Column(Boolean, nullable=False, default=True)
+    # Output payload contract
+    output_schema = Column(
+        JSONB,
+        nullable=True,
+    )
 
-    created_at = Column(DateTime)
+    # Default execution template shipped by MFlows
+    #
+    # Examples:
+    #
+    # Python:
+    # {
+    #   "execution_type": "python",
+    #   "configuration": {
+    #       "handler": "generate_pdf"
+    #   }
+    # }
+    #
+    # HTTP:
+    # {
+    #   "execution_type": "http",
+    #   "configuration": {
+    #       "method": "POST",
+    #       "endpoint": "/payments/create"
+    #   }
+    # }
+    execution_template = Column(
+        JSONB,
+        nullable=True,
+    )
 
-    updated_at = Column(DateTime)
-    
-    embedding = Column(Vector(384), nullable=True)
+    active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
 
-    # Python function name in the dispatcher ACTION_MAP.
-    # When set, the dispatcher uses this name to resolve the handler,
-    # allowing DB aliases to map to canonical function names without code changes.
-    handler_name = Column(String, nullable=True)
+    embedding = Column(
+        Vector(384),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

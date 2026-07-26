@@ -1,8 +1,17 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+import enum
 
-from sqlalchemy.sql import func
-from app.db.base import Base
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.db.base import Base
+
+
+class MappingStatus(str, enum.Enum):
+    PENDING   = "PENDING"
+    MAPPED    = "MAPPED"
+    UNMAPPED  = "UNMAPPED"
+    FAILED    = "FAILED"
 
 
 class WorkflowActionMapping(Base):
@@ -11,22 +20,37 @@ class WorkflowActionMapping(Base):
     id = Column(Integer, primary_key=True)
 
     workflow_knowledge_id = Column(
-        Integer, ForeignKey("workflow_knowledge.id"), nullable=False
+        Integer,
+        ForeignKey("workflow_knowledge.id"),
+        nullable=False,
     )
+
+    extract_name = Column(String, nullable=False)
+
+    description = Column(Text)
+
+    matched_action_definition_id = Column(
+        Integer,
+        ForeignKey("action_definitions.id"),
+        nullable=True,
+    )
+
+    status = Column(
+        Enum(MappingStatus, name="mappingstatus"),
+        nullable=False,
+        default=MappingStatus.PENDING,
+    )
+
+    similarity_score = Column(Float, nullable=True)
+
+    confidence = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
     workflow = relationship(
         "WorkflowKnowledge",
         back_populates="actions",
     )
 
-    extract_name = Column(String, nullable=False)
-    description = Column(Text)
-    matched_action_definition_id = Column(Integer, ForeignKey("action_definitions.id"))
-    status = Column(String, nullable=False, default="PENDING")
-    similarity_score = Column(Float, nullable=True)
-
     action_definition = relationship("ActionDefinition")
-    
-
-    confidence = Column(Float)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())

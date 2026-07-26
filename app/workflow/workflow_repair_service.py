@@ -1,3 +1,6 @@
+from app.prompts import WORKFLOW_REPAIR_PROMPT
+
+
 class WorkflowRepairService:
 
     def repair(
@@ -6,21 +9,8 @@ class WorkflowRepairService:
         validation_errors,
         original_prompt,
     ):
-        repair_prompt = f"""
-Original Prompt:
-
-{original_prompt}
-
-Previous Output:
-
-{raw_output}
-
-Validation Errors:
-
-{validation_errors}
-
-Fix the workflow.
-
-Return JSON only.
-"""
-        return repair_prompt
+        return WORKFLOW_REPAIR_PROMPT.format(
+            original_prompt=original_prompt,
+            raw_output=raw_output,
+            validation_errors=validation_errors,
+        )

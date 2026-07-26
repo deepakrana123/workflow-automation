@@ -26,3 +26,4 @@ def _load(filename: str) -> str:
 
 # Backward-compatible constant — prefer PromptManager.build() in new code
 WORKFLOW_EXTRACTION_PROMPT: str = _load("extractor.md")
+WORKFLOW_REPAIR_PROMPT: str = _load("repair.md")
