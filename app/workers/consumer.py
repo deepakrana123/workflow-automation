@@ -4,8 +4,8 @@ from app.db.session import SessionLocal
 from app.core.logger import logger
 from concurrent.futures import ThreadPoolExecutor
 from app.execution.runtime_processor import runtime_processor
+from app.execution.constants import REDIS_EVENT_QUEUE
 
-QUEUE = "workflow_events"
 MAX_WORKERS = 5
 
 
@@ -35,7 +35,7 @@ def worker():
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     logger.info("consumer_worker_started")
     while True:
-        item = redis_client.brpop(QUEUE, timeout=5)
+        item = redis_client.brpop(REDIS_EVENT_QUEUE, timeout=5)
         if not item:
             continue
         _, event_data = item

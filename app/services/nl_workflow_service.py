@@ -16,8 +16,8 @@ from app.core.logger import logger
 
 # NLP pipeline
 from app.nlp.catalog.matcher import CatalogMatcher
-from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
-from app.nlp.catalog.actionRepository import ActionDefinitionRepository
+from app.nlp.catalog.trigger_repository import TriggerDefinitionRepository
+from app.nlp.catalog.action_repository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
 from app.prompting import PromptManager
 from app.nlp.llm_manager.llm_manager import LLMManager
@@ -37,11 +37,7 @@ from app.nlp.ast.builder import WorkflowASTBuilder
 from app.nlp.ast.validator import ASTValidator
 from app.nlp.complier.workflow_complier import WorkflowComplier
 from app.semantic.semantic_catalog_retriever import SemanticCatalogRetriever
-ALLOWED_DOMAINS = {
-    "finance",
-    "health",
-    "support",
-}
+from app.core.domains import ALLOWED_DOMAINS
 
 
 def _build_compiler_service() -> WorkflowCompilerService:
@@ -81,6 +77,8 @@ def generate_workflow_service(
     name: str,
     domain: str,
     db: Session,
+    nlp_service: NLPWorkflowService | None = None,
+    persistence_service: WorkflowPersistenceService | None = None,
 ) -> dict:
     """
     Full pipeline: NL → compile → save → return response.
@@ -94,7 +92,8 @@ def generate_workflow_service(
             f"Invalid domain '{domain}'. Allowed: {sorted(ALLOWED_DOMAINS)}"
         )
 
-    nlp_service = _build_nlp_service(db)
+    if nlp_service is None:
+        nlp_service = _build_nlp_service(db)
     nlp_service._domain = domain
 
     logger.info("nl_workflow_generation_started",
@@ -104,7 +103,7 @@ def generate_workflow_service(
     compile_result = nlp_service.generate(user_request)
 
     # Persist compiled result
-    persistence = WorkflowPersistenceService()
+    persistence = persistence_service or WorkflowPersistenceService()
     saved = persistence.save(
         db=db,
         name=name,

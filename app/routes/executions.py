@@ -6,7 +6,6 @@ Exposes workflow execution history and step details for the frontend.
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 
 from app.db.session import get_db
 from app.models.workflow_execution import WorkflowExecution

@@ -1,17 +1,18 @@
 """
 app/execution/executors/python_executor.py
 
-Executes internal Python handlers registered in the dispatcher ACTION_MAP.
+Executes internal Python handlers via ActionHandlerRegistry.
 
 Flow:
     ActionConfiguration.configuration["handler"]
         ↓
-    ACTION_MAP lookup
+    ActionHandlerRegistry lookup
         ↓
-    handler(payload, config)  →  ActionResult
+    handler(context, configuration)  →  ActionResult
 """
 
 from app.execution.executors.base_executor import BaseExecutor
+from app.execution.exceptions import HandlerNotFoundError
 from app.models.action_configurations_model import ActionConfiguration
 from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
@@ -24,45 +25,32 @@ class PythonExecutor(BaseExecutor):
         configuration: ActionConfiguration,
         context: dict,
     ) -> ActionResult:
-        # Import here to avoid circular import at module load time
-        from app.execution.action_registry import ACTION_MAP
+        # Deferred import — breaks potential circular import at module load time
+        from app.execution.python.action_handler_registry import ACTION_HANDLER_MAP
 
-        cfg = configuration.configuration or {}
+        cfg          = configuration.configuration or {}
         handler_name = cfg.get("handler")
 
         if not handler_name:
-            logger.error(
-                "python_executor_missing_handler",
-                extra={"extra_data": {
-                    "action_configuration_id": configuration.id,
-                    "configuration": cfg,
-                }},
-            )
-            return ActionResult(
-                success=False,
-                error="python_executor: no handler defined in configuration",
-                metadata={"skip_retry": True},
+            raise HandlerNotFoundError(
+                handler_name=None,
+                action_configuration_id=configuration.id,
             )
 
-        handler = ACTION_MAP.get(handler_name)
+        handler = ACTION_HANDLER_MAP.get(handler_name)
 
         if not handler:
-            logger.error(
-                "python_executor_handler_not_found",
-                extra={"extra_data": {
-                    "handler_name": handler_name,
-                    "action_configuration_id": configuration.id,
-                }},
-            )
-            return ActionResult(
-                success=False,
-                error=f"python_executor: handler '{handler_name}' not in ACTION_MAP",
-                metadata={"skip_retry": True},
+            raise HandlerNotFoundError(
+                handler_name=handler_name,
+                action_configuration_id=configuration.id,
             )
 
         logger.info(
             "python_executor_dispatching",
-            extra={"extra_data": {"handler_name": handler_name}},
+            extra={"extra_data": {
+                "handler_name":            handler_name,
+                "action_configuration_id": configuration.id,
+            }},
         )
 
         raw = handler(context, cfg)

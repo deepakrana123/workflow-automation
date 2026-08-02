@@ -11,9 +11,9 @@ from app.repositories.step_retry_history_repo import record_retry_history
 from app.services import trace_service
 from app.core.tracing import build_log_context
 from app.core.logger import logger
+from app.execution.constants import REDIS_EVENT_QUEUE
 
 BATCH_SIZE = 50
-WORKFLOW_EVENTS_QUEUE = "workflow_events"
 MAX_RECOVERY_ATTEMPTS = 3
 
 
@@ -128,7 +128,7 @@ def start_reaper():
                 retry_payload = {"workflow_execution_id": execution.id}
 
                 redis_client.lpush(
-                    WORKFLOW_EVENTS_QUEUE,
+                    REDIS_EVENT_QUEUE,
                     json.dumps(retry_payload),
                 )
 

@@ -15,8 +15,6 @@ class VectorRepository:
 
         trigger.embedding = embedding
 
-        db.commit()
-
     def update_action_embedding(
         self, db: Session, action_id: int, embedding: list[float]
     ):
@@ -25,5 +23,3 @@ class VectorRepository:
         )
 
         action.embedding = embedding
-
-        db.commit()

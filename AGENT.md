@@ -28,7 +28,7 @@ Both paths produce a `parsed_rule_json` stored in the `workflows` table. The run
 - Every action must return `ActionResult`. The runtime reads nothing else.
 - `result.success` is the only field retry logic reads. Never check `result.error` for retry decisions.
 - `WorkflowContext.outputs` is append-only during a run. Steps read previous outputs but cannot remove them.
-- Prompt templates are files in `app/nlp/prompts/versions/`. Never hardcode prompts in Python.
+- Prompt templates are files in `app/prompting/versions/`. Never hardcode prompts in Python.
 
 ---
 
@@ -266,7 +266,7 @@ Extend `DocumentExtractor.extract()` with a new `elif suffix == ".docx":` branch
 
 ## Prompt Versioning
 
-Templates live at `app/nlp/prompts/versions/workflow_generation/v1.txt`.
+Templates live at `app/prompting/versions/workflow_generation/v1.txt`.
 
 - `PromptRegistry` scans `versions/` at startup, caches all templates
 - `PromptVersionStore` (in-memory) tracks `active` and `previous` per prompt name

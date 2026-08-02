@@ -1,11 +1,23 @@
+"""
+app/core/setting.py
+
+Runtime path configuration for external OCR dependencies.
+
+Override with environment variables in production / Docker:
+  TESSERACT_PATH   — full path to the tesseract executable
+  POPPLER_PATH     — path to the Poppler bin directory
+
+Defaults point to standard Linux install locations (used in containers).
+The Windows developer paths are no longer hardcoded here.
+"""
+
+import os
 from pathlib import Path
 
 TESSERACT_PATH = Path(
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    os.getenv("TESSERACT_PATH", "/usr/bin/tesseract")
 )
-
 
 POPPLER_PATH = Path(
-    r"C:\Users\Devendra\Downloads\Release-26.02.0-0\poppler-26.02.0\Library\bin"
+    os.getenv("POPPLER_PATH", "/usr/bin")
 )
-

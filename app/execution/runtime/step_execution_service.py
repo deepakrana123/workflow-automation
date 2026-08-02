@@ -143,3 +143,13 @@ def mark_step_blocked(db, step_execution):
         step_execution=step_execution,
         new_status=STEP_STATUS_BLOCKED,
     )
+
+
+def get_step_statuses(db, workflow_execution_id: int) -> list[str]:
+    """Return status values for all steps in a workflow execution."""
+    steps = (
+        db.query(ExecutionStep)
+        .filter(ExecutionStep.workflow_execution_id == workflow_execution_id)
+        .all()
+    )
+    return [step.status for step in steps]

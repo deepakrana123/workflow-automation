@@ -5,6 +5,7 @@ from app.execution.runtime.workflow_execution_service import (
     mark_workflow_running,
     mark_workflow_failed,
 )
+from app.execution.runtime.constants import WORKFLOW_STATUS_PENDING, WORKFLOW_STATUS_PAUSED
 from app.execution.runtime.dag_executor import run_dag_execution
 from app.execution.runtime.workflow_finalizer import finalize_workflow_execution
 from app.services import trace_service
@@ -27,7 +28,7 @@ def runtime_processor(db, workflow_execution_id: int):
         return
 
     # Guard: skip if already past PENDING (duplicate delivery from Redis)
-    if workflow_execution.status not in ("PENDING", "PAUSED"):
+    if workflow_execution.status not in (WORKFLOW_STATUS_PENDING, WORKFLOW_STATUS_PAUSED):
         logger.info(
             "workflow_execution_already_processed",
             extra={

@@ -30,8 +30,8 @@ load_dotenv()
 from app.db.session import SessionLocal
 from app.models.workflow_execution import WorkflowExecution
 from app.nlp.catalog.matcher import CatalogMatcher
-from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
-from app.nlp.catalog.actionRepository import ActionDefinitionRepository
+from app.nlp.catalog.trigger_repository import TriggerDefinitionRepository
+from app.nlp.catalog.action_repository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
 from app.prompting import PromptManager, PromptContext, PromptKey
 from app.nlp.llm_manager.llm_manager import LLMManager

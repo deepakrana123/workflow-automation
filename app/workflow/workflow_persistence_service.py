@@ -16,13 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories import workflow as workflow_repo
 from app.core.logger import logger
-
-
-ALLOWED_DOMAINS = {
-    "finance",
-    "health",
-    "support",
-}
+from app.core.domains import ALLOWED_DOMAINS
 
 
 class WorkflowPersistenceService:
