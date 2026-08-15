@@ -41,16 +41,10 @@ class PromptKey(str, Enum):
 
     # Flat (markdown) prompts
     WORKFLOW_EXTRACTION = "extractor.md"
-    WORKFLOW_VALIDATION = "validator.md"
     WORKFLOW_REPAIR = "repair.md"
-    DSL_GENERATION = "dsl.md"
 
     # Versioned prompts (name matches directory under versions/)
     WORKFLOW_GENERATION = "workflow_generation"
-
-    # Extend as needed:
-    # EXECUTION_PLANNER = "planner.md"
-    # QUERY_TRANSFORM   = "query_transform.md"
 
     @property
     def is_versioned(self) -> bool:

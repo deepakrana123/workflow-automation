@@ -1,15 +1,16 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-
 
 if not DATABASE_URL:
     raise RuntimeError(
-        "DATABASE_URL missing. Check Railway Variables."
+        "DATABASE_URL environment variable is not set. "
+        "Add it to your .env file or deployment configuration."
     )
 
 engine = create_engine(
@@ -27,9 +28,17 @@ SessionLocal = sessionmaker(
     bind=engine,
 )
 
+
 def get_db():
-    db = SessionLocal()
+    """
+    FastAPI dependency that yields a SQLAlchemy session.
+    Rolls back on any unhandled exception before closing.
+    """
+    db: Session = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

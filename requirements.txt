@@ -1,37 +1,45 @@
 # Web framework
 fastapi==0.115.12
 uvicorn==0.34.0
+python-multipart==0.0.32
 
 # Database
 sqlalchemy==2.0.40
 alembic==1.15.2
 psycopg2-binary==2.9.10
+pgvector==0.3.6
 
 # Data validation
 pydantic==2.11.3
 
-# Task queue
+# Task queue / cache
 celery==5.5.1
 redis==5.2.1
 
-# HTTP client
+# HTTP client (Gemini REST provider)
 requests==2.32.3
 
+# Embeddings / retrieval (pulls torch, transformers, numpy, scikit-learn, scipy)
+sentence-transformers==5.7.0
+rank-bm25==0.2.2
 
-pgvector==0.3.6
+# IDs (tracing / ulid)
+ulid-py==1.1.0
+ulid==1.1
 
-sentence-transformers
+# PDF / document ingestion (extraction + OCR)
+pypdf==6.15.0
+pytesseract==0.3.13
+pdf2image==1.17.0
+Pillow==12.3.0          # OCR image handling (pdf2image -> PIL images -> pytesseract)
 
-
-pytest==8.4.1
-pytest-cov==6.2.1
+# File generation (document actions)
+reportlab==5.0.0        # PDF generator
+openpyxl==3.1.5         # Excel (.xlsx) generator
 
 # Environment variables
 python-dotenv==1.1.0
 
-ulid-py
-
-ulid
-
-
-rank-bm25
+# Testing
+pytest==8.4.1
+pytest-cov==6.2.1

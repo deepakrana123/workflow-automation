@@ -59,8 +59,30 @@ class NLPWorkflowService:
     #  Public entry point                                                  #
     # ------------------------------------------------------------------ #
 
-    def generate(self, user_request: str) -> dict:
-        catalog_result = self.catalog_matcher.match(self._db,user_request)
+    def generate(
+        self,
+        user_request: str,
+        *,
+        catalog_result=None,
+        extra_variables: dict | None = None,
+        prompt_version: str | None = None,
+    ) -> dict:
+        """Generate a workflow from a natural-language request.
+
+        Args:
+            user_request: the instruction.
+            catalog_result: pre-computed candidate set. When None (the global
+                path), the injected catalog_matcher searches the full catalog.
+                Workspace-scoped callers pass a WorkspaceCatalogMatcher result so
+                the global catalog is never consulted.
+            extra_variables: additional prompt template variables (e.g. workspace
+                summary + business rules) merged into the context.
+            prompt_version: pin a specific prompt template version (e.g. "v2" for
+                the workspace template). None uses the active version — leaving
+                the global path and its auto-rollback behavior unchanged.
+        """
+        if catalog_result is None:
+            catalog_result = self.catalog_matcher.match(self._db, user_request)
         workflow_type = catalog_result.workflow_type
 
         suitability = self.suitability_agent.evaluate(
@@ -71,21 +93,23 @@ class NLPWorkflowService:
         if not suitability.supported:
             raise ValueError(suitability.reason)
 
-        context = PromptContext(
-            variables={
-                "workflow_type": workflow_type or "general",
-                "triggers": "\n".join(t.name for t in catalog_result.matched_triggers),
-                "actions": "\n".join(a.name for a in catalog_result.matched_actions),
-                "user_request": user_request,
-            }
-        )
+        variables = {
+            "workflow_type": workflow_type or "general",
+            "triggers": "\n".join(t.name for t in catalog_result.matched_triggers),
+            "actions": "\n".join(a.name for a in catalog_result.matched_actions),
+            "user_request": user_request,
+        }
+        if extra_variables:
+            variables.update(extra_variables)
+
+        context = PromptContext(variables=variables)
 
         build_result = self.prompt_manager.build_with_metadata(
-            PromptKey.WORKFLOW_GENERATION, context
+            PromptKey.WORKFLOW_GENERATION, context, version=prompt_version
         )
         prompt = build_result.prompt
         prompt_name = build_result.prompt_name
-        prompt_version = build_result.version
+        prompt_version = prompt_version or build_result.version
         estimated_tokens = build_result.estimated_tokens
 
         last_errors = None

@@ -8,12 +8,12 @@ Currently implements substring/alias-based search as a fallback
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.models.trigger_definitions import TriggerDefinition
 from app.models.action_definitions import ActionDefinition
+from app.core.text_similarity import text_similarity
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -21,27 +21,6 @@ router = APIRouter(prefix="/search", tags=["search"])
 class SemanticSearchRequest(BaseModel):
     query: str
     top_k: int = 10
-
-
-def _text_similarity(name: str, query: str) -> float:
-    """
-    Simple text-based similarity score.
-    Returns 0.0–1.0. Higher = more similar.
-    Replace with pgvector cosine similarity when embeddings are ready.
-    """
-    q = query.lower()
-    n = name.lower()
-    if q == n:
-        return 1.0
-    if q in n or n in q:
-        return 0.85
-    # Word overlap score
-    q_words = set(q.split())
-    n_words = set(n.replace("_", " ").split())
-    overlap = len(q_words & n_words)
-    if overlap:
-        return 0.5 + (overlap / max(len(q_words), len(n_words))) * 0.3
-    return 0.1
 
 
 @router.post("/semantic")
@@ -61,9 +40,9 @@ def semantic_search(
     for t in trigger_rows:
         # Score against name, display_name, and aliases
         score = max(
-            _text_similarity(t.name.replace("_", " "), query),
-            _text_similarity(t.display_name or "", query),
-            *[_text_similarity(a, query) for a in (t.aliases or [])],
+            text_similarity(t.name.replace("_", " "), query),
+            text_similarity(t.display_name or "", query),
+            *[text_similarity(a, query) for a in (t.aliases or [])],
         )
         if score > 0.1:
             trigger_matches.append({
@@ -85,9 +64,9 @@ def semantic_search(
     action_matches = []
     for a in action_rows:
         score = max(
-            _text_similarity(a.name.replace("_", " "), query),
-            _text_similarity(a.display_name or "", query),
-            *[_text_similarity(al, query) for al in (a.aliases or [])],
+            text_similarity(a.name.replace("_", " "), query),
+            text_similarity(a.display_name or "", query),
+            *[text_similarity(al, query) for al in (a.aliases or [])],
         )
         if score > 0.1:
             action_matches.append({

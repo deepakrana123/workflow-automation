@@ -1,4 +1,19 @@
-def fetch_entity_payload(db, entity_type, entity_id):
+"""
+app/repositories/entity_repo.py
+
+Entity payload retrieval.
+
+NOTE: This is a placeholder stub that returns mock data.
+Replace with actual DB queries when entity models are implemented.
+"""
+
+
+def get_payload(db, entity_type: str, entity_id: str) -> dict:
+    """
+    Retrieve entity payload by type and id.
+
+    Returns an empty dict if entity type is unknown.
+    """
     if entity_type == "loan":
         return {
             "loan_id": entity_id,

@@ -9,6 +9,7 @@ from app.models.event_processing import EventProcessing
 from app.models.generation_log import GenerationLog
 from app.models.trigger_definitions import TriggerDefinition
 from app.models.action_definitions import ActionDefinition
+from app.models.human_task import HumanTask
 __all__ = [
     "Workflow",
     "WorkflowRun",
@@ -20,6 +21,6 @@ __all__ = [
     "EventProcessing",
     "GenerationLog",
     "TriggerDefinition",
-    "ActionDefinition"
-    
+    "ActionDefinition",
+    "HumanTask",
 ]

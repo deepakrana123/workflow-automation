@@ -10,6 +10,7 @@ from app.schemas.workflow import (
 )
 from app.services import nl_workflow_service
 from app.repositories import workflow as workflow_repo
+from app.workflow.workflow_provenance import WorkflowProvenanceService
 from app.core.logger import logger
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -41,8 +42,12 @@ def generate_workflow(
 
 
 @router.get("/", response_model=List[WorkflowResponse])
-def list_workflows(domain: str | None = None, db: Session = Depends(get_db)):
-    return workflow_repo.list_by_domain(db, domain)
+def list_workflows(
+    domain: str | None = None,
+    workspace_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return workflow_repo.list_workflows(db, domain=domain, workspace_id=workspace_id)
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
@@ -124,3 +129,15 @@ def get_workflow_compiled(workflow_id: int, db: Session = Depends(get_db)):
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return workflow.parsed_rule_json or {}
+
+
+@router.get("/{workflow_id}/provenance")
+def get_workflow_provenance(workflow_id: int, db: Session = Depends(get_db)):
+    """Trace each workflow step back to its source (BRD clause + confidence).
+
+    Derived on demand from the extraction mappings — no stored state.
+    """
+    result = WorkflowProvenanceService().for_workflow(db, workflow_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return result

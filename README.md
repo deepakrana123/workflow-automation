@@ -1,229 +1,165 @@
-# MFlows — AI Workflow Automation Engine
+# MFlows — AI-Powered Banking Workflow Engine
 
-> Natural language in. Running workflow out. Built for banking and financial services.
+> Natural Language → Compiled DAG → Deterministic Execution
 
-MFlows is a **production-grade AI workflow engine** that converts plain English business requirements into executable, observable, fault-tolerant DAG workflows — no manual DSL authoring, no drag-and-drop.
-
-It also ingests **BRD (Business Requirement Documents)** — upload a PDF, and the system extracts triggers, actions, and business rules automatically using LLM extraction + vector embedding matching.
+MFlows converts plain English banking instructions into executable workflow DAGs. Upload a BRD or type a sentence — the platform extracts intent, maps to a 500+ banking action catalog, compiles a dependency graph, and executes it with retry, tracing, and dead-letter recovery.
 
 ---
 
-## The Problem It Solves
+## What It Does
 
-Banking and financial operations involve hundreds of complex workflows — loan origination, fraud response, collections, KYC — each with strict sequencing, parallel steps, retries, and compliance requirements. Building these manually is slow, error-prone, and disconnected from business intent.
-
-MFlows bridges the gap between business language and executable automation.
-
----
-
-## What It Does — In One Sentence Each
-
-| Capability | Description |
-|---|---|
-| **NL → DAG** | Converts "When payment is missed escalate case and notify manager" into an executable parallel workflow |
-| **BRD Ingestion** | Upload a banking PDF — extracts workflow knowledge using OCR + Gemini LLM |
-| **Semantic Catalog** | Matches user intent to catalog triggers/actions using pgvector + BAAI embeddings |
-| **DAG Execution** | Runs sequential, parallel, diamond, and deep-chain patterns with full observability |
-| **Fault Tolerance** | Retry with exponential backoff, DLQ, reaper recovery for stuck executions |
-| **Multi-LLM** | Ollama (local) → Gemini fallback with health tracking, cooldown, and auto-rollback |
-
----
-
-## Live Demo — 30 Seconds
-
-```bash
-# 1. Generate a workflow from natural language
-curl -X POST http://localhost:8000/api/workflows/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_request": "When payment is missed escalate case and notify manager then create audit record",
-    "name": "payment-missed-flow",
-    "domain": "finance"
-  }'
-
-# Response: workflow_id=12, DSL generated, steps compiled
-
-# 2. Execute it
-curl -X POST http://localhost:8000/api/execute/ \
-  -d '{"workflow_id": 12, "entity_id": "customer-001"}'
-
-# 3. Poll status → PENDING → RUNNING → COMPLETED
-
-# 4. Upload a BRD PDF
-curl -X POST http://localhost:8000/api/knowledge-ingestion/upload \
-  -F "file=@home_loan_brd.pdf"
 ```
+"When payment is missed, send reminder, then escalate to collections"
+                              ↓
+              NLP Pipeline (Gemini + Semantic Search)
+                              ↓
+           Compiled DAG: @1 → send_reminder, @2 → escalate_case
+                              ↓
+             Deterministic Execution (parallel, retry, DLQ)
+```
+
+**Two ingestion paths. One execution engine.**
+
+| Path | Input | Output |
+|------|-------|--------|
+| Natural Language | "freeze account on fraud detection" | Compiled workflow |
+| BRD Upload | Banking requirement PDF | Mapped workflow knowledge |
 
 ---
 
 ## Architecture
 
-Two independent ingestion paths. One deterministic execution engine.
-
 ```
-Path 1: Natural Language
-═══════════════════════════════════════════════════════
-User Input → CatalogMatcher (keyword + pgvector)
-          → SuitabilityAgent (domain validation)
-          → PromptBuilder (versioned templates)
-          → LLMManager (Ollama → Gemini fallback)
-          → WorkflowCompilerService
-               DSLGenerator → @step DSL
-               RuleParser   → ParseNode list
-               ASTBuilder   → WorkflowAST
-               ASTValidator → cycle + dep check
-               Compiler     → parsed_rule_json
-          → WorkflowPersistenceService → DB
-
-Path 2: BRD Document
-═══════════════════════════════════════════════════════
-PDF Upload → DocumentExtractor (PyPDF + Tesseract OCR)
-           → WorkflowExtractor (Gemini LLM)
-                Extracts: triggers, actions, business rules,
-                          actors, external systems
-           → WorkflowRepository → WorkflowKnowledge
-           → EmbeddingMapper (BAAI/bge-small-en-v1.5)
-                pgvector cosine → best matching action_definition
-           → ActionConfigurationService
-                {execution_type: "python", handler: "fn_name"}
-
-Execution Engine (shared by both paths)
-═══════════════════════════════════════════════════════
-Redis queue → consumer worker
-           → runtime_processor
-           → dag_executor + WorkflowContext
-           → dag_scheduler (dependency-resolved ready steps)
-           → step_executor → dispatcher
-           → ActionConfiguration → Python handler
-           → ActionResult → WorkflowContext.outputs.update()
-           → retry_handler (exponential backoff)
-           → workflow_finalizer (COMPLETED / FAILED / DLQ)
-           → reaper_worker (stuck execution recovery)
+┌─────────────────────────────────────────────────────────────┐
+│                     FastAPI (14 endpoints)                    │
+└──────────┬────────────────────────────────────┬─────────────┘
+           │                                    │
+    ┌──────▼──────┐                     ┌──────▼──────┐
+    │ NLP Pipeline │                     │   BRD       │
+    │              │                     │   Ingestion │
+    │ Catalog Match│                     │   OCR+LLM   │
+    │ LLM Generate │                     │   Embedding │
+    │ Validate+    │                     │   Mapping   │
+    │ Compile      │                     │             │
+    └──────┬───────┘                     └──────┬──────┘
+           │                                    │
+           └────────────────┬───────────────────┘
+                            ▼
+              ┌──────────────────────────┐
+              │    Compiled Workflow      │
+              │    (parsed_rule_json)     │
+              └────────────┬─────────────┘
+                           ▼
+    ┌──────────────────────────────────────────────┐
+    │           Execution Engine                    │
+    │                                              │
+    │  Redis Queue → DAG Executor → Step Executor  │
+    │  Parallel Fan-out │ Retry (exp backoff)      │
+    │  DLQ │ Reaper Recovery │ Distributed Tracing │
+    └──────────────────────────────────────────────┘
+                           ▼
+              ┌──────────────────────────┐
+              │  PostgreSQL + Redis       │
+              │  pgvector (384-dim)       │
+              └──────────────────────────┘
 ```
 
 ---
 
 ## Key Engineering Decisions
 
-### 1. Compiler Pipeline — not just prompt-to-execution
-Most LLM workflow tools execute prompt output directly. MFlows compiles it:
-- LLM JSON → DSL (@step format) → AST → validated DAG
-- AST validation catches cycles, unknown dependencies, duplicate IDs
-- The compiler is LLM-independent and fully unit testable
-
-### 2. ActionResult Contract
-Every handler returns a typed `ActionResult(success, outputs, error, metadata)` — not arbitrary dicts. Outputs accumulate in `WorkflowContext` across steps, enabling future Decision Nodes.
-
-### 3. Semantic + Keyword Hybrid Catalog
-`CatalogMatcher` first tries exact keyword/alias matching, then falls back to pgvector similarity search. This means "bill is past due" correctly resolves to `payment_due` trigger even without exact vocabulary.
-
-### 4. ActionConfiguration Layer
-A `WorkflowActionMapping` doesn't execute directly. It goes through `ActionConfiguration` which carries `{execution_type, handler}`. This makes the system ready for HTTP integrations, MCP tools, AI agents, and human-in-the-loop tasks — without changing the execution engine.
-
-### 5. Fault Tolerance — three recovery mechanisms
-- **Retry worker** — exponential backoff via Redis sorted set (30s → 60s → 120s...)
-- **Reaper worker** — scans for executions stuck >60s, requeues up to 3 times
-- **DLQ** — permanent failure after max retries, workflow marked FAILED
+| Decision | Why |
+|----------|-----|
+| LLM output is never executed directly | Always passes compile → validate → AST → DAG |
+| Execution engine is ML-free | Deterministic. Same DAG = same execution order. Always. |
+| 500+ banking action catalog with semantic search | Vector embeddings + BM25 + RRF + Cross-Encoder re-ranking |
+| Prompt versioning with auto-rollback | 5 consecutive failures → automatic rollback to previous version |
+| Exponential backoff retry + DLQ | 5 retries (30s, 60s, 120s, 240s, 480s) then dead-letter |
+| Reaper worker recovers stuck executions | Timeout detection + automatic re-queue |
+| Per-action execution configuration | Same action, different execution per workflow (Python handler or HTTP endpoint) |
 
 ---
 
-## Test Results
+## Tech Stack
 
-| Suite | Cases | Result | What It Proves |
-|---|---|---|---|
-| `test_dsl_pipeline.py` | 5 | ✅ 5/5 | Compiler works without LLM |
-| `test_full_pipeline.py` | 8 | ✅ 8/8 | All DAG patterns execute correctly |
-| `test_nlp_to_dsl.py` | 18 | ✅ 14/18 | Real LLM → real DB → compile |
-| `test1.py` | 35 | ✅ 25+/35 | Full E2E: NLP → execute → COMPLETED |
-| `test_semantic_e2e.py` | 105 | ✅ 75%+ | Synonym inputs via semantic search |
-
-> 4 failures in `test_nlp_to_dsl.py` are catalog data gaps (missing aliases), not code bugs.
-> 75% on semantic E2E means the system handles real paraphrase variation at production scale.
-
----
-
-## Domain Coverage
-
-**Finance / Banking — 90+ actions**
-
-| Category | Examples |
-|---|---|
-| Payments | NEFT, RTGS, IMPS, validate transaction, payment confirmation |
-| Fraud | AML screening, sanctions check, freeze account, risk scoring |
-| Loan Origination | CIBIL check, income verification, underwriting, sanction letter |
-| Home Loan | Property valuation, technical visit, legal verification, mortgage, tranche disbursement |
-| Car Loan | Vehicle valuation, dealer invoice, RC hypothecation, delivery confirmation |
-| Collections | Overdue notice, recovery agent, legal notice, write-off, restructure |
-| KYC | Initiate, complete, send reminder, document verification |
-| Accounts | Open, close, upgrade, card operations, overdraft, credit limit |
-| Regulatory | Regulatory report, audit record, compliance check |
-
-**Support — 10 actions**
-Ticket lifecycle · SLA breach · complaint escalation · refunds · satisfaction survey
-
-**Health — 10 actions**
-Critical vitals · emergency protocol · medication reminder · discharge · insurance approval
+| Layer | Technology |
+|-------|-----------|
+| API | FastAPI · Python 3.12 |
+| Database | PostgreSQL (Supabase) · pgvector |
+| Queue | Redis (event queue + sorted set retries) |
+| LLM | Gemini 2.5 Flash · Ollama (local) |
+| Embeddings | BAAI/bge-small-en-v1.5 · all-MiniLM-L6-v2 |
+| OCR | Tesseract · pdf2image · Poppler |
+| Container | Docker · Docker Compose |
 
 ---
 
-## Execution Patterns Validated
-
-| Pattern | Description | Test |
-|---|---|---|
-| Sequential | A → B → C | ✅ P02 |
-| Parallel fan-out | A → (B ∥ C) | ✅ P01 |
-| Diamond | A → (B ∥ C) → D | ✅ P03 |
-| Diamond + tail | (A ∥ B) → C → D | ✅ P04 |
-| Deep chain | A → B → C → D → E | ✅ P05 |
-| 3-way parallel | A → (B ∥ C ∥ D) | ✅ P06 |
-
----
-
-## Infrastructure
-
-| Component | Technology | Why |
-|---|---|---|
-| API | FastAPI | Async, typed, fast |
-| Database | PostgreSQL + pgvector (Supabase) | Relational + vector in one DB |
-| Queue | Redis BRPOP + sorted set | Reliable delivery + timed retries |
-| ORM | SQLAlchemy + Alembic | Schema migrations, relationship loading |
-| LLM Primary | Ollama / qwen2.5:7b | Local, no API cost, fast iteration |
-| LLM Fallback | Google Gemini REST | Cloud fallback when local unavailable |
-| Embeddings | BAAI/bge-small-en-v1.5 | 384-dim, local, MTEB-ranked for retrieval |
-| Vector Search | pgvector cosine distance | Native Postgres, no extra infra |
-| Tracing | ULID (trace_id + span_id) | Sortable, distributed-safe IDs |
-| Containerisation | Docker + docker-compose | 5-service stack in one command |
-
----
-
-## Getting Started
+## Quick Start
 
 ```bash
-git clone <repo>
+# Clone and setup
+git clone <repo-url>
 cd mflows
+cp .env.example .env  # Add your GEMINI_API_KEY and DATABASE_URL
 
-# Configure environment
-cp .env.example .env
-# Required: DATABASE_URL, GEMINI_API_KEY, REDIS_HOST
+# Run everything
+docker-compose up
 
-# Run DB migrations
-alembic upgrade head
+# Seed the banking catalog (500+ actions)
+docker-compose exec api python scripts/seed_banking_catalog.py
 
-# Seed catalog embeddings (run once after seeding trigger/action definitions)
-python scripts/backfill_embeddings.py
-
-# Start everything
-docker-compose up --build
-
-# Start API + Redis only (faster for development)
-docker-compose up --build api redis
+# Generate embeddings
+docker-compose exec api python scripts/backfill_embeddings.py
 ```
 
-**Health check:**
+**Services running:**
+- API: `http://localhost:8000`
+- API Docs: `http://localhost:8000/docs`
+- Redis: `localhost:6379`
+
+---
+
+## Core Capabilities
+
+### NLP → Workflow Generation
 ```bash
-curl http://localhost:8000/api/health/ready
-# 200 → system ready  |  503 → DB or Redis not connected
+curl -X POST http://localhost:8000/api/workflows/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_request": "when loan payment is missed send reminder then assign recovery agent",
+    "name": "loan_collection_flow",
+    "domain": "finance"
+  }'
 ```
+
+### BRD Document Ingestion
+```bash
+curl -X POST http://localhost:8000/api/knowledge-ingestion/upload \
+  -F "file=@loan_origination_brd.pdf"
+```
+
+### Execute Workflow
+```bash
+curl -X POST http://localhost:8000/api/execute/ \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_id": 1, "entity_id": "LOAN-2024-001"}'
+```
+
+---
+
+## Banking Domains Covered
+
+| Domain | Actions |
+|--------|---------|
+| Customer Onboarding & KYC | PAN/Aadhaar verification, CKYC, Video KYC, PEP screening |
+| Loan Origination | CIBIL check, underwriting, sanction letter, disbursement |
+| Loan Servicing | EMI reminders, NPA classification, collections, SARFAESI |
+| Payments | NEFT, RTGS, IMPS, UPI, SWIFT, NACH mandates |
+| Cards | Block/replace, credit limit, rewards, disputes |
+| Fraud & Risk | AML screening, sanctions check, transaction monitoring |
+| Compliance | RBI returns, FATCA, Basel reporting, GST/TDS |
+| Trade Finance | Letter of Credit, Bank Guarantee, Bill Discounting |
+| Treasury | Forex deals, forward contracts, ALM reporting |
 
 ---
 
@@ -231,68 +167,161 @@ curl http://localhost:8000/api/health/ready
 
 ```
 app/
-├── nlp/                    NLP pipeline (catalog, LLM, prompts, AST, compiler)
-│   ├── catalog/            Keyword + alias matching
-│   ├── semantic/           pgvector embedding search
-│   ├── llm_manager/        Multi-LLM routing + health
-│   ├── prompts/            Versioned templates + auto-rollback
-│   ├── ast/                ParseNode → WorkflowAST + validation
-│   └── services/           NLPWorkflowService orchestrator
-├── workflow/               Compiler + Persistence services
-├── execution/              DAG runtime
-│   ├── runtime/            step_executor, dag_executor, finalizer, reaper
-│   ├── dispatcher.py       action name → ActionResult
-│   └── domain_actions/     handlers: banking, home loan, car loan, support, health
-├── workflow_execution/     ActionResult + WorkflowContext schemas
-├── knowledge_ingestions/   BRD ingestion pipeline
-├── action_configuration/   Execution metadata layer
-├── routes/                 15+ FastAPI route files
-├── models/                 SQLAlchemy models
-├── repositories/           DB access layer
-└── core/                   Logger, Redis client, startup health checks
+├── core/          # Infrastructure (config, logging, Redis, tracing)
+├── models/        # SQLAlchemy ORM (12 models)
+├── routes/        # FastAPI routers (14 endpoints)
+├── services/      # Business orchestration
+├── repositories/  # Data access layer
+├── execution/     # DAG executor, retry, dispatcher, workers
+├── nlp/           # LLM pipeline, catalog matching, AST compiler
+├── prompting/     # Unified prompt management (versioned)
+├── knowledge_ingestions/  # BRD processing pipeline
+├── retrieval/     # Vector + BM25 + RRF + Cross-Encoder
+├── semantic/      # Embedding service + pgvector
+├── workflow/      # Compiler chain (DSL → AST → DAG)
+└── evaluation/    # Retrieval accuracy framework
 ```
 
 ---
 
-## API Reference (Summary)
+## Execution Engine Highlights
 
-```
-POST /api/workflows/generate          NL → compile → save
-GET  /api/workflows/{id}/dsl          Reconstructed DSL
-GET  /api/workflows/{id}/ast          AST as nodes + edges
-GET  /api/workflows/{id}/compiled     Full parsed_rule_json
-
-POST /api/execute/                    Queue DAG execution
-POST /api/execute/{id}/pause|resume
-
-GET  /api/executions/                 History with filters
-GET  /api/executions/{id}             Steps + trace
-
-POST /api/knowledge-ingestion/upload  BRD PDF → workflow knowledge
-
-POST /api/search/semantic             pgvector similarity search
-
-GET  /api/catalog/triggers|actions    DB catalog with search
-
-GET  /api/dashboard/stats             KPI summary
-GET  /api/analytics/*                 6 analytics endpoints
-
-GET  /api/health/ready                Readiness probe (503 if not ready)
-GET  /api/health/providers            LLM provider health + cooldown
-
-GET  /api/prompts/stats               Prompt version pass rate
-POST /api/prompts/{name}/rollback     Manual version rollback
-```
-
-Full reference: see `AGENT.md`
+- **DAG Scheduling** — Dependency-ordered step execution with parallel fan-out
+- **Dual Executors** — Python (internal handlers) + HTTP (external APIs via workspace integrations)
+- **Checkpoint-based Error Handling** — Precise failure location in execution lifecycle
+- **Distributed Tracing** — trace_id + span_id for full execution timeline
+- **Idempotent Dispatch** — Redis lock + DB duplicate guard prevents double execution
 
 ---
 
-## What's Next
+## Documentation
 
-- **Hybrid Search** — BM25 + embeddings + Reciprocal Rank Fusion for catalog matching
-- **Cross-encoder reranking** — `ms-marco-MiniLM` for top-K → top-3 precision
-- **Multi-agent architecture** — GenerationAgent · ValidationAgent · RepairAgent
-- **Decision Nodes** — branch on `WorkflowContext.outputs` values
-- **MCP integration** — external tool calls as action handlers
-- **RAG** — BRD chunks as few-shot context in generation prompt
+Full technical documentation in [`docs/`](./docs/):
+
+1. [System Overview](docs/01-system-overview.md)
+2. [Domain Model](docs/02-domain-model.md)
+3. [Database Schema](docs/03-database.md)
+4. [BRD Ingestion](docs/04-brd-ingestion.md)
+5. [Action Mapping](docs/05-action-mapping.md)
+6. [Execution Engine](docs/06-execution-engine.md)
+7. [Workspaces](docs/07-workspaces.md)
+8. [Action Configurations](docs/08-action-configurations.md)
+9. [Runtime Architecture](docs/09-runtime.md)
+10. [Retry System](docs/10-retry-system.md)
+11. [API Design](docs/11-api-design.md)
+12. [Folder Structure](docs/12-folder-structure.md)
+13. [Security](docs/13-security.md)
+14. [Future Roadmap](docs/14-future-roadmap.md)
+
+---
+
+## Design Principles
+
+- **Banking-first** — Every action, trigger, and workflow is banking domain terminology
+- **LLM as compiler input, not runtime** — The execution engine never calls an LLM
+- **Deterministic execution** — Same DAG always produces same step ordering
+- **Fail-safe** — Retry with backoff → DLQ → Reaper recovery. No silent failures.
+- **Observable** — Every step traced, every retry logged, every LLM call metered
+
+---
+
+## Workspace-Scoped Workflow Generation
+
+The **workspace** is the primary context for AI generation. Inside a workspace,
+MFlows generates workflows from that workspace's BRD-derived knowledge — not the
+full global catalog.
+
+- **Global catalog = a library, not an ingredient.** Workspace generation is
+  grounded only in the workspace's mapped actions/triggers + business rules.
+  Global actions are added **explicitly** via the "+ Add Action" picker
+  (`selected_action_ids`), never auto-injected.
+- **Two distinct build paths:**
+  - **Synthesize from BRDs** — deterministic, no LLM (`POST /api/workspaces/{id}/synthesize`).
+  - **Build with AI** — workspace-scoped LLM (`POST /api/workspaces/{id}/generate`).
+- **Explainability first** — documents, extracted business rules, and workspace
+  actions are visible before generation; cross-BRD threshold conflicts (e.g.
+  approval above ₹5L vs ₹10L) are surfaced for review, not silently resolved.
+
+### New backend endpoints
+
+```
+GET  /api/workspaces/{id}/overview        # counts + summary + derived domain + status
+GET  /api/workspaces/{id}/documents       # per-BRD extraction/mapping status + counts
+GET  /api/workspaces/{id}/business-rules  # extracted rules (+ detected conflicts)
+GET  /api/workspaces/{id}/actions         # workspace-scoped actions (+ unresolved) + triggers
+POST /api/workspaces/{id}/generate        # AI generation grounded in the workspace
+```
+
+Request body for `/generate`:
+
+```json
+{
+  "name": "personal_loan_approval_flow",
+  "user_request": "Create a workflow for a personal loan application after KYC verification.",
+  "domain": "finance",
+  "selected_action_ids": []
+}
+```
+
+### Frontend
+
+- `/workspaces/:id` — tabs: Overview, Documents, Business Rules, Actions, Triggers.
+- `/workspaces/:id/build` — "Build with AI": workspace context + instruction +
+  global "+ Add Action" picker + generated-workflow review.
+
+### Run & test locally
+
+```bash
+# 1. Redis (matches .env REDIS_HOST=localhost)
+docker run -d --rm --name mflows-redis -p 6379:6379 redis:7
+
+# 2. Python env (project targets 3.12)
+python -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+.venv\Scripts\python -m pip install -r requirements.txt
+
+# 3. Apply DB migrations (adds workflows.workspace_id)
+.venv\Scripts\python -m alembic upgrade head
+
+# 4. (first time only) seed the catalog + embeddings
+.venv\Scripts\python scripts/seed_banking_catalog.py
+.venv\Scripts\python scripts/backfill_embeddings.py
+
+# 5. API + workers (run each in its own terminal)
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+.venv\Scripts\python -m app.workers.consumer
+.venv\Scripts\python -m app.workers.retry_worker
+.venv\Scripts\python -m app.workers.reaper_worker
+
+# 6. Frontend
+cd mflows/web && npm install && npm run dev   # http://localhost:5173 (proxies /api → :8000)
+```
+
+Smoke-testing the workspace pipeline (after seeding a catalog and ingesting at
+least one BRD into a workspace so it has mapped actions):
+
+```bash
+# inspect what the workspace understood
+curl http://localhost:8000/api/workspaces/1/overview
+curl http://localhost:8000/api/workspaces/1/business-rules
+curl http://localhost:8000/api/workspaces/1/actions
+
+# generate a workflow grounded in that workspace
+curl -X POST http://localhost:8000/api/workspaces/1/generate \
+  -H "Content-Type: application/json" \
+  -d '{"name":"loan_flow","user_request":"process a personal loan after KYC","domain":"finance"}'
+```
+
+> Note: `/generate` requires the workspace to have BRD actions mapped to the
+> catalog. If none are mapped it returns HTTP 400 ("Workspace has no mapped
+> actions…") — ingest a BRD first, or add actions explicitly.
+
+### Unit tests (deterministic layers)
+
+```bash
+.venv\Scripts\python -m pytest tests/unit -q
+```
+
+Covers the workspace synthesis, context builders, workspace catalog matcher,
+prompt-var builder, and rule-conflict detector. DB/LLM-coupled paths are verified
+against the running environment.

@@ -5,9 +5,7 @@ from app.models.action_definitions import ActionDefinition
 
 class SemanticRepository:
 
-    DISTANCE_THRESHOLD = 0.30
-
-    def search_triggers(self, db, embedding, limit=5):
+    def search_triggers(self, db, embedding, limit=5, distance_threshold: float = 0.30):
         query = text("""
             SELECT id, embedding <=> CAST(:embedding AS vector) AS distance
             FROM trigger_definitions
@@ -21,8 +19,7 @@ class SemanticRepository:
             "limit": limit,
         }).fetchall()
 
-        # Filter by threshold and return full ORM objects
-        ids = [row.id for row in rows if row.distance < self.DISTANCE_THRESHOLD]
+        ids = [row.id for row in rows if row.distance < distance_threshold]
         if not ids:
             return []
 
@@ -33,7 +30,7 @@ class SemanticRepository:
             .all()
         )
 
-    def search_actions(self, db, embedding, limit=5):
+    def search_actions(self, db, embedding, limit=5, distance_threshold: float = 0.30):
         query = text("""
             SELECT id, embedding <=> CAST(:embedding AS vector) AS distance
             FROM action_definitions
@@ -47,7 +44,7 @@ class SemanticRepository:
             "limit": limit,
         }).fetchall()
 
-        ids = [row.id for row in rows if row.distance < self.DISTANCE_THRESHOLD]
+        ids = [row.id for row in rows if row.distance < distance_threshold]
         if not ids:
             return []
 

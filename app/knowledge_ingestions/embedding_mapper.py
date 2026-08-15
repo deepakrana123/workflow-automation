@@ -44,7 +44,7 @@ class EmbeddingMapper:
 
             self.repository.update_action_mapping(
                 mapping_id=action.id,
-                action_definitation_id=best.entity.id,
+                action_definition_id=best.entity.id,
                 similarity_score=best.rrf_score,
                 confidence=best.rrf_score,
             )
@@ -62,7 +62,7 @@ class EmbeddingMapper:
 
             self.repository.update_trigger_mapping(
                 mapping_id=trigger.id,
-                trigger_definitation_id=best.entity.id,
+                trigger_definition_id=best.entity.id,
                 similarity_score=best.rrf_score,
                 confidence=best.rrf_score,
             )

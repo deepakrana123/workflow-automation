@@ -18,7 +18,9 @@ class WorkflowResponse(BaseModel):
     name: str
     domain: str
     raw_input: str
+    workspace_id: Optional[int] = None
     parsed_rule_json: Optional[Dict[str, Any]] = None
+    explanation: Optional[Dict[str, Any]] = None
     status: Optional[str] = "active"
     priority: Optional[int] = 1
     created_at: datetime | None = None
@@ -52,3 +54,4 @@ class WorkflowGenerateResponse(BaseModel):
     dsl: str
     execution_plan: Dict[str, List[str]]
     parsed_rule_json: Optional[Dict[str, Any]] = None
+    explanation: Optional[Dict[str, Any]] = None

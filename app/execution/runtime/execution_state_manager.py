@@ -51,7 +51,8 @@ STEP_TRANSITIONS = {
     },
     STEP_STATUS_WAITING: {
         STEP_STATUS_RUNNING,
-        STEP_STATUS_FAILED,
+        STEP_STATUS_COMPLETED,  # human approved -> step completes
+        STEP_STATUS_FAILED,     # human rejected -> step fails
     },
     STEP_STATUS_BLOCKED: {
         STEP_STATUS_PENDING,

@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -11,6 +11,7 @@ from app.knowledge_ingestions.exceptions import (
     WorkflowExtractionError,
     RepositoryError,
 )
+from app.models.workspace import Workspace
 from app.core.logger import logger
 
 router = APIRouter(prefix="/knowledge-ingestion", tags=["knowledge-ingestion"])
@@ -18,88 +19,118 @@ router = APIRouter(prefix="/knowledge-ingestion", tags=["knowledge-ingestion"])
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
 
 
-@router.post("/upload")
-def upload_brd(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-):
-    """
-    Accept a BRD PDF, extract workflow knowledge, persist to DB,
-    run embedding-based mapping, and return the ingestion result.
-    """
-    # ── Validate content type ─────────────────────────────────────────────────
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type '{file.content_type}'. Only PDF is accepted.",
-        )
+def _ingest_one(
+    service: KnowledgeIngestionService,
+    file: UploadFile,
+    workspace_id: int,
+) -> dict:
+    """Ingest a single BRD, returning a per-file result (never raises).
 
-    # ── Validate non-empty ────────────────────────────────────────────────────
+    Isolating each file means one bad document does not abort the batch.
+    """
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        return {
+            "filename": file.filename,
+            "status": "failed",
+            "error": f"Invalid file type '{file.content_type}'. Only PDF is accepted.",
+        }
+
     content = file.file.read()
     if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        return {
+            "filename": file.filename,
+            "status": "failed",
+            "error": "Uploaded file is empty.",
+        }
 
-    # ── Write to temp file, pass path to service ─────────────────────────────
     tmp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".pdf",
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(content)
             tmp_path = Path(tmp.name)
 
-        service = KnowledgeIngestionService(db=db)
-        knowledge = service.ingest(tmp_path)
-
+        knowledge = service.ingest(
+            tmp_path,
+            workspace_id=workspace_id,
+            source_document=file.filename,
+        )
         logger.info(
             "knowledge_ingestion_success",
-            extra={
-                "extra_data": {
-                    "workflow_id": knowledge.id,
-                    "workflow_name": knowledge.workflow_name,
-                    "filename": file.filename,
-                }
-            },
+            extra={"extra_data": {
+                "workflow_id": knowledge.id,
+                "workflow_name": knowledge.workflow_name,
+                "filename": file.filename,
+                "workspace_id": workspace_id,
+            }},
         )
-
         return {
+            "filename": file.filename,
+            "status": "success",
             "workflow_id": knowledge.id,
             "workflow_name": knowledge.workflow_name,
-            "status": "success",
         }
 
-    except HTTPException:
-        raise
-
-    except DocumentExtractionError as e:
+    except (DocumentExtractionError, WorkflowExtractionError, RepositoryError) as exc:
         logger.warning(
-            "knowledge_ingestion_extraction_failed",
-            extra={"extra_data": {"error": str(e), "filename": file.filename}},
+            "knowledge_ingestion_failed",
+            extra={"extra_data": {
+                "error": str(exc),
+                "filename": file.filename,
+                "error_type": type(exc).__name__,
+            }},
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        return {"filename": file.filename, "status": "failed", "error": str(exc)}
 
-    except WorkflowExtractionError as e:
-        logger.warning(
-            "knowledge_ingestion_workflow_extraction_failed",
-            extra={"extra_data": {"error": str(e), "filename": file.filename}},
-        )
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except RepositoryError as e:
-        logger.error(
-            "knowledge_ingestion_repository_failed",
-            extra={"extra_data": {"error": str(e), "filename": file.filename}},
-        )
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except Exception as e:
+    except Exception as exc:  # noqa: BLE001 - reported per file, batch continues
         logger.error(
             "knowledge_ingestion_unexpected_error",
-            extra={"extra_data": {"error": str(e), "filename": file.filename}},
+            extra={"extra_data": {"error": str(exc), "filename": file.filename}},
         )
-        raise HTTPException(status_code=500, detail="Ingestion failed unexpectedly.")
+        return {
+            "filename": file.filename,
+            "status": "failed",
+            "error": "Ingestion failed unexpectedly.",
+        }
 
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink()
+
+
+@router.post("/upload")
+def upload_brds(
+    files: list[UploadFile] = File(...),
+    workspace_id: int = Form(1),
+    db: Session = Depends(get_db),
+):
+    """Ingest one or more BRD PDFs into a workspace.
+
+    Each file is ingested independently — partial success is reported per file.
+    Every BRD becomes its own WorkflowKnowledge tagged with its source filename,
+    all owned by the given workspace.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    workspace = (
+        db.query(Workspace)
+        .filter(Workspace.id == workspace_id, Workspace.active.is_(True))
+        .first()
+    )
+    if workspace is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Active workspace {workspace_id} not found.",
+        )
+
+    service = KnowledgeIngestionService(db=db)
+    results = [_ingest_one(service, f, workspace_id) for f in files]
+
+    succeeded = sum(1 for r in results if r["status"] == "success")
+    return {
+        "workspace_id": workspace_id,
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": len(results) - succeeded,
+        "results": results,
+    }

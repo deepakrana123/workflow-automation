@@ -1,4 +1,3 @@
-from typing import List
 from app.models.workflow_knowledge import WorkflowKnowledge
 from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.workflow_action_mapping import WorkflowActionMapping
@@ -7,7 +6,6 @@ from app.models.workflow_actor import WorkflowActor
 from app.models.workflow_external_system import WorkflowExternalSystem
 from app.knowledge_ingestions.schemas import WorkflowExtraction
 from sqlalchemy.orm import Session
-from app.knowledge_ingestions.exceptions import RepositoryError
 from app.models.action_definitions import ActionDefinition
 from app.models.trigger_definitions import TriggerDefinition
 from sqlalchemy import func
@@ -17,63 +15,67 @@ class WorkflowRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def save(self, workflow: WorkflowExtraction):
-        try:
-            knowledge = WorkflowKnowledge(
-                workflow_name=workflow.workflow_name, summary=workflow.summary
+    def save(
+        self,
+        workflow: WorkflowExtraction,
+        workspace_id: int | None = None,
+        source_document: str | None = None,
+    ):
+        knowledge = WorkflowKnowledge(
+            workflow_name=workflow.workflow_name,
+            summary=workflow.summary,
+            workspace_id=workspace_id,
+            source_document=source_document,
+        )
+
+        self.db.add(knowledge)
+        self.db.flush()
+
+        for trigger in workflow.triggers:
+            self.db.add(
+                WorkflowTriggerMapping(
+                    workflow_knowledge_id=knowledge.id,
+                    extracted_name=trigger.name,
+                    description=trigger.description,
+                )
             )
 
-            self.db.add(knowledge)
-            self.db.flush()
-
-            for trigger in workflow.triggers:
-                self.db.add(
-                    WorkflowTriggerMapping(
-                        workflow_knowledge_id=knowledge.id,
-                        extracted_name=trigger.name,
-                        description=trigger.description,
-                    )
+        for action in workflow.action_references:
+            self.db.add(
+                WorkflowActionMapping(
+                    workflow_knowledge_id=knowledge.id,
+                    extract_name=action.name,
+                    description=action.description,
                 )
+            )
 
-            for action in workflow.action_references:
-                self.db.add(
-                    WorkflowActionMapping(
-                        workflow_knowledge_id=knowledge.id,
-                        extract_name=action.name,
-                        description=action.description,
-                    )
+        for rule in workflow.business_rules:
+            self.db.add(
+                WorkflowBusinessRule(
+                    workflow_knowledge_id=knowledge.id,
+                    rule=rule.rule,
                 )
+            )
 
-            for rule in workflow.business_rules:
-                self.db.add(
-                    WorkflowBusinessRule(
-                        workflow_knowledge_id=knowledge.id,
-                        rule=rule.rule,
-                    )
+        for actor in workflow.actors:
+            self.db.add(
+                WorkflowActor(
+                    workflow_knowledge_id=knowledge.id,
+                    name=actor.name,
+                    role=actor.role,
                 )
+            )
 
-            for actor in workflow.actors:
-                self.db.add(
-                    WorkflowActor(
-                        workflow_knowledge_id=knowledge.id,
-                        name=actor.name,
-                        role=actor.role,
-                    )
+        for system in workflow.external_systems:
+            self.db.add(
+                WorkflowExternalSystem(
+                    workflow_knowledge_id=knowledge.id,
+                    name=system.name,
+                    description=system.description,
                 )
-
-            for system in workflow.external_systems:
-                self.db.add(
-                    WorkflowExternalSystem(
-                        workflow_knowledge_id=knowledge.id,
-                        name=system.name,
-                        description=system.description,
-                    )
-                )
-            self.db.commit()
-            return knowledge
-        except Exception as e:
-            self.db.rollback()
-            raise RepositoryError(f"Failed to persist workflow: {e}") from e
+            )
+        self.db.flush()
+        return knowledge
 
     def get_unmapped_actions(self):
         return (
@@ -88,18 +90,6 @@ class WorkflowRepository:
             .filter(WorkflowTriggerMapping.matched_trigger_definition_id.is_(None))
             .all()
         )
-
-    def find_best_action(self, embedding):
-        # Backward compatibility.
-        # Will be removed once HybridRetriever is fully integrated.
-        results = self.search_actions_by_embedding(embedding, limit=1)
-        return results[0] if results else None
-
-    def find_best_trigger(self, embedding):
-        # Backward compatibility.
-        # Will be removed once HybridRetriever is fully integrated.
-        results = self.search_triggers_by_embedding(embedding, limit=1)
-        return results[0] if results else None
 
     def search_actions_by_embedding(
         self, embedding, limit: int = 20
@@ -128,44 +118,40 @@ class WorkflowRepository:
     def update_action_mapping(
         self,
         mapping_id: int,
-        action_definitation_id: int,
+        action_definition_id: int,
         similarity_score: float,
         confidence: float,
-    ):
+    ) -> None:
         mapping = (
             self.db.query(WorkflowActionMapping)
             .filter(WorkflowActionMapping.id == mapping_id)
             .first()
         )
-
         if mapping is None:
             return
-
-        mapping.matched_action_definition_id = action_definitation_id
+        mapping.matched_action_definition_id = action_definition_id
         mapping.similarity_score = similarity_score
         mapping.confidence = confidence
-        self.db.commit()
+        self.db.flush()
 
     def update_trigger_mapping(
         self,
         mapping_id: int,
-        trigger_definitation_id: int,
+        trigger_definition_id: int,
         similarity_score: float,
         confidence: float,
-    ):
+    ) -> None:
         mapping = (
             self.db.query(WorkflowTriggerMapping)
             .filter(WorkflowTriggerMapping.id == mapping_id)
             .first()
         )
-
         if mapping is None:
             return
-
-        mapping.matched_trigger_definition_id = trigger_definitation_id
+        mapping.matched_trigger_definition_id = trigger_definition_id
         mapping.similarity_score = similarity_score
         mapping.confidence = confidence
-        self.db.commit()
+        self.db.flush()
 
     def get_workflow_actions(self, workflow_knowledge_id: int):
         return (

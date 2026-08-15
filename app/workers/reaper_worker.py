@@ -11,9 +11,10 @@ from app.repositories.step_retry_history_repo import record_retry_history
 from app.services import trace_service
 from app.core.tracing import build_log_context
 from app.core.logger import logger
+from app.execution.constants import REDIS_EVENT_QUEUE
+from app.services import human_task_service
 
 BATCH_SIZE = 50
-WORKFLOW_EVENTS_QUEUE = "workflow_events"
 MAX_RECOVERY_ATTEMPTS = 3
 
 
@@ -22,6 +23,21 @@ def start_reaper():
         db = SessionLocal()
 
         try:
+            # Auto-resolve human approval tasks whose timeout has elapsed,
+            # applying each task's configured on_timeout (approve|reject).
+            try:
+                resolved = human_task_service.resolve_timed_out_tasks(db)
+                if resolved:
+                    logger.info(
+                        "reaper_resolved_timed_out_human_tasks",
+                        extra={"extra_data": {"count": resolved}},
+                    )
+            except Exception as ht_err:
+                logger.error(
+                    "reaper_human_task_sweep_error",
+                    extra={"extra_data": {"error": str(ht_err)}},
+                )
+
             timeout_threshold = datetime.now(timezone.utc) - timedelta(
                 seconds=PROCESSING_TIMEOUT_SECONDS
             )
@@ -128,7 +144,7 @@ def start_reaper():
                 retry_payload = {"workflow_execution_id": execution.id}
 
                 redis_client.lpush(
-                    WORKFLOW_EVENTS_QUEUE,
+                    REDIS_EVENT_QUEUE,
                     json.dumps(retry_payload),
                 )
 

@@ -2,6 +2,116 @@
 
 > This document is for engineers working on or reviewing the MFlows codebase.
 > It covers architecture decisions, module contracts, extension points, and invariants.
+>
+> **Precedence:** where this document and the code disagree, the code and the
+> "Current Architecture" section below are authoritative. Older sections are
+> kept for context but may describe superseded designs (noted inline).
+
+---
+
+## Current Architecture & Working Agreements (authoritative — read first)
+
+### Product scope (do NOT drift from this)
+MFlows is a **banking workflow AI platform**, not a generic automation tool.
+Keep it simple, deterministic, and auditable. The following are **deliberate,
+accepted decisions — do not "helpfully" add them or argue to change them
+without being asked:**
+
+- **No authentication / authorization / multi-tenant enforcement** — intentionally out of scope (demo). The architecture leaves seams for it; don't build it unprompted.
+- **No autonomous agents, no planner, no MCP, no multi-agent** — the AI is a **deterministic pipeline** (Workspace → Retrieval → Extraction → Mapping → Compilation → Validation → Execution). Any stage may later be swapped for an agent; today it stays a pipeline.
+- **Don't over-engineer for enterprise scale** — target ~40–50 actions, ~20–30 BRDs. No sharding, no event-sourcing, no CQRS.
+
+### How to work in this codebase
+- **Audit → design → build.** For anything touching the execution core, confirm the design before coding.
+- **New logic ships with unit tests.** Prefer pure, dependency-injected functions so they test without DB/LLM. Tests live in `tests/unit/`; run `python -m pytest tests/unit -q`.
+- **Derived-not-stored** for read models (provenance, workspace synthesis) — project over existing data, no new tables unless necessary.
+- **Gate risky runtime changes** behind opt-in markers so existing workflows are byte-for-byte unaffected (see the rule-engine `routing` gate).
+- Deterministic layers are fully testable here; **DB/Redis/LLM-coupled paths are verified in the deployed environment** — say so honestly.
+
+### Current execution model (SUPERSEDES the old "Dispatcher" section)
+Dispatch is via an **ExecutorRegistry**, not a `dispatcher.py` (that source is retired; only a stale `.pyc` remains).
+
+```
+step_executor.execute_workflow_step()
+  → resolve_action_configuration(action)        → (ActionConfiguration, execution_type)
+  → ExecutorRegistry.get_executor(execution_type)
+  → executor.execute(configuration, context)     → ActionResult
+```
+
+- **`ExecutionType`** (`app/execution/executors/constants.py`): `python`, `http`, `human_task`. (`mcp`, `kafka`, `ai_agent` are reserved in the schema, not built.)
+- **`PythonExecutor`** → looks up `configuration["handler"]` in `ACTION_HANDLER_MAP` (`app/execution/python/action_handler_registry.py`). Document generators (`generate_pdf/csv/excel`) are registered here and persist via the file storage layer.
+- **`HttpExecutor`** → uses the bound `WorkspaceIntegration` (base_url/auth) + `configuration["response_mapping"]` to normalize the external response into `outputs`.
+- **`HumanExecutor`** → returns an `ActionResult` with `metadata["execution_status"] == "WAITING"` + a `human_task` spec; it does **not** complete synchronously.
+
+### Subsystems added since the original doc
+- **File storage** (`app/storage/`): `StorageProvider` (ABC) → `LocalStorageProvider`; `FileStorageService.store()/retrieve()`. Generators return `{file_id, storage_path}` in outputs (not raw bytes).
+- **Human approval + resumable DAG:** `human_task` executor + `HumanTask` model + `human_task_service` (approve/reject, timeout via reaper). The DAG executor **rehydrates completed/failed/waiting/skipped steps + per-step outputs** from `execution_steps` for **exactly-once** resume. Never re-run a completed step.
+- **Rule engine core** (`app/execution/rules/`): `evaluate_condition` (pure, total — never raises), `resolve_activated_children` (parent-decides-child routing), `resolve_skipped_steps` (SKIPPED cascade). Runtime is gated on a compiled step carrying a `routing` key. v1 = tree branches (no diamond merges).
+- **Output contract:** `output_validation.py` validates a step's outputs against the action's `output_schema` (non-fatal; attached to `metadata`). Rules ground onto declared fields.
+- **Multi-BRD:** `workspace_synthesis` (dedup + provenance across BRDs) and `workspace_workflow_synthesizer` (aggregate → sequential DAG → compile). Workspaces have CRUD.
+- **Provenance / Explanation:** `workflow_provenance` (step → source BRD clause + confidence, derived) and `workflow_explainer` (deterministic, catalog-grounded, stored on `Workflow.explanation`).
+
+### Workspace-scoped workflow generation (authoritative — added most recently)
+
+The workspace is now the **primary context** for AI generation. There are two
+generation paths and they are deliberately kept separate:
+
+- **Global NL generation (unchanged):** `POST /api/workflows/generate` →
+  `NLPWorkflowService.generate(user_request)` grounds the LLM in the **entire**
+  global catalog via `CatalogMatcher` + `SemanticCatalogRetriever`. Still the
+  behavior of the standalone `/workflows/generate` screen. Untouched.
+- **Workspace-scoped generation (new):** `POST /api/workspaces/{id}/generate` →
+  `generate_workspace_workflow_service(...)`. Grounds the LLM **only** in the
+  workspace's mapped actions/triggers (+ explicitly selected globals) and the
+  workspace business rules. The global catalog is never auto-injected.
+
+Key rule: **the global catalog is a library, not an ingredient.** In the
+workspace path it is reachable only when the user explicitly passes
+`selected_action_ids` (the frontend "+ Add Action" picker). This is enforced
+structurally — the workspace matcher never calls `get_active()`.
+
+**New / changed modules:**
+
+| Module | Path | Contract |
+|---|---|---|
+| `WorkspaceCatalogMatcher` | `app/nlp/catalog/workspace_catalog_matcher.py` | `.match(workspace_id, selected_action_ids) → CatalogMatchResult`. Queries ONLY workspace-mapped `ActionDefinition`/`TriggerDefinition` (joined through `WorkflowActionMapping`/`WorkflowTriggerMapping` by `workspace_id`) + selected globals. Pure assembly split into `build_workspace_match_result(...)`. |
+| `WorkspaceContextService` | `app/workflow/workspace_context.py` | `.overview/.documents/.business_rules/.actions(db, workspace_id)` — read-only projections over existing knowledge. Reuses `WorkspaceSynthesisService`. Pure builders: `build_overview`, `build_document_view`, `build_workspace_prompt_vars`. |
+| rule conflicts | `app/workflow/rule_conflicts.py` | `detect_rule_conflicts(rules) → [threshold_conflict, ...]`. Pure, deterministic: flags cross-BRD monetary-threshold conflicts (e.g. approval above ₹5L vs ₹10L). Surfaces only — never resolves. |
+| workspace generation | `app/services/nl_workflow_service.py` | `generate_workspace_workflow_service(db, workspace_id, name, user_request, domain, selected_action_ids)` — orchestrates matcher + v2 prompt + persist. |
+| `NLPWorkflowService.generate` | `app/nlp/services/nl_workflow_service.py` | now accepts `catalog_result=`, `extra_variables=`, `prompt_version=` (all optional, backward-compatible). |
+
+**Prompt:** a new versioned template `app/prompting/versions/workflow_generation/v2.txt`
+(= v1 + `{workspace_summary}` + `{business_rules}`) is used **only** via an
+explicit `version="v2"` pin. The active global version stays `v1` and
+auto-rollback is unaffected.
+
+**New workspace endpoints** (`app/routes/workspaces.py`):
+`GET /{id}/overview`, `GET /{id}/documents`, `GET /{id}/business-rules`,
+`GET /{id}/actions`, `POST /{id}/generate`. (Existing `/{id}/synthesis` and
+`/{id}/synthesize` — deterministic, no LLM — remain.)
+
+**Schema change:** `workflows.workspace_id` (nullable FK → `workspaces.id`,
+migration `b8d4e5f6a7c9`). Set by both workspace paths (AI generate +
+deterministic synthesize); NULL for global generation. Enables per-workspace
+workflow counts (`WorkspaceContextService.overview.workflow_count`).
+
+**Invariants for this feature:**
+- Workspace generation NEVER queries the global catalog; leakage is only via
+  explicit `selected_action_ids`.
+- v1 (global) prompt and its rollback behavior are unchanged.
+- Conflicts are surfaced (in `synthesis.review_flags` as `rule_conflict` and on
+  `GET /{id}/business-rules`), never auto-resolved.
+- Deterministic synthesis and AI generation coexist as distinct actions.
+- Pure builders live in dependency-light modules and are unit-tested
+  (`tests/unit/test_workspace_*`, `test_rule_conflicts.py`); DB/LLM-coupled
+  paths are verified in the running environment.
+
+### Updated invariants (in addition to those below)
+- Every executor returns `ActionResult`; the `WAITING` marker in `metadata` is checked **before** success/failure.
+- A **completed step never re-runs** on resume (rehydration guarantees exactly-once).
+- **Routing is opt-in** — steps without a `routing` key behave exactly as before.
+- **Provenance/synthesis are derived** — never persisted as duplicate state.
+- `WorkflowContext` lives at `app/workflow_execution/schemas/workflow_context.py` and now carries **both** flat `outputs` and per-step `steps["<id>"]["<field>"]`.
 
 ---
 
@@ -28,7 +138,7 @@ Both paths produce a `parsed_rule_json` stored in the `workflows` table. The run
 - Every action must return `ActionResult`. The runtime reads nothing else.
 - `result.success` is the only field retry logic reads. Never check `result.error` for retry decisions.
 - `WorkflowContext.outputs` is append-only during a run. Steps read previous outputs but cannot remove them.
-- Prompt templates are files in `app/nlp/prompts/versions/`. Never hardcode prompts in Python.
+- Prompt templates are files in `app/prompting/versions/`. Never hardcode prompts in Python.
 
 ---
 
@@ -177,7 +287,13 @@ execute_action → mark_step_completed/failed → handle_retry
 
 The `checkpoint` variable tells you exactly which operation crashed.
 
-### Dispatcher
+### Dispatcher  ⚠️ SUPERSEDED — see "Current execution model" at the top
+> This `execute_action` / `_PRODUCTION_ACTION_MAP` / `dispatcher.py` model is
+> **retired**. Dispatch is now `ExecutorRegistry.get_executor(execution_type)`
+> → `executor.execute(configuration, context)`. Python handlers live in
+> `ACTION_HANDLER_MAP` (`app/execution/python/action_handler_registry.py`).
+> The text below is kept only for historical context.
+
 `execute_action(action_name, payload, config) → ActionResult`
 
 Resolution order:
@@ -253,11 +369,14 @@ class WorkflowContext:
 2. Add to `providers` list in `LLMManager.__init__`
 3. Add to `FALLBACK_PROVIDERS` in `NLPWorkflowService` if it should be a fallback
 
-### Adding a new execution type (HTTP, MCP, AI agent)
-The `ActionConfiguration.configuration` JSONB field carries `execution_type`. The dispatcher currently only handles `python`. To add `http`:
-1. Read `execution_type` from the configuration in `execute_action`
-2. Route to an HTTP executor that reads `configuration["url"]`, POSTs payload, wraps response in `ActionResult`
-3. No changes to step_executor, retry_handler, or dag_executor
+### Adding a new execution type (MCP, Kafka, AI agent)
+`python`, `http`, and `human_task` already exist. To add another (the seam is the executor registry — no engine surgery):
+1. Add the type to `ExecutionType` (`app/execution/executors/constants.py`).
+2. Implement `MyExecutor(BaseExecutor).execute(configuration, context) → ActionResult`, reading `ActionConfiguration.configuration` (and `workspace_integration` for connection/secrets).
+3. Register it in `ExecutorRegistry` (`app/execution/executors/registry.py`).
+4. No changes to `step_executor`, `retry_handler`, `dag_executor`, or the finalizer — dispatch, retry, tracing, and file storage come for free.
+
+(An action that produces a file should persist via `FileStorageService` and return `{file_id, storage_path}` in `outputs`, like the generators.)
 
 ### Adding a new BRD document type (DOCX, HTML)
 Extend `DocumentExtractor.extract()` with a new `elif suffix == ".docx":` branch. OCR fallback already handles anything that becomes a rasterized image.
@@ -266,7 +385,7 @@ Extend `DocumentExtractor.extract()` with a new `elif suffix == ".docx":` branch
 
 ## Prompt Versioning
 
-Templates live at `app/nlp/prompts/versions/workflow_generation/v1.txt`.
+Templates live at `app/prompting/versions/workflow_generation/v1.txt`.
 
 - `PromptRegistry` scans `versions/` at startup, caches all templates
 - `PromptVersionStore` (in-memory) tracks `active` and `previous` per prompt name

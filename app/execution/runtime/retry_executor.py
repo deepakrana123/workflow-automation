@@ -1,19 +1,25 @@
 """
 app/execution/runtime/retry_executor.py
 
-Handles re-execution of steps that were scheduled for retry via Redis.
+Re-executes steps scheduled for retry via Redis.
 
-Uses the same dispatch path as step_executor:
-  ActionConfiguration → ExecutorRegistry → Executor.execute()
+Uses the identical dispatch path as StepExecutor:
+    ActionConfiguration  (resolved via config_resolver)
+        ↓
+    ExecutorRegistry.get_executor(execution_type)
+        ↓
+    executor.execute(configuration, context)
+        ↓
+    ActionResult
 
-This ensures retry behaviour is identical to first-attempt behaviour.
+This guarantees retry behaviour is always consistent with first-attempt behaviour.
 """
 
 from app.models.workflow import Workflow
 from app.models.workflow_knowledge import WorkflowKnowledge
-from app.models.action_definitions import ActionDefinition
-from app.repositories.action_configuration_repository import ActionConfigurationRepository
-from app.execution.executors.registry import ExecutorRegistry
+from app.execution.runtime.config_resolver import resolve_action_configuration
+from app.execution.executors.registry import get_executor as registry_get_executor
+from app.execution.exceptions import ConfigurationNotFoundError, ExecutorNotFoundError
 from app.workflow_execution.schemas.action_result import ActionResult
 
 from app.execution.runtime.step_execution_service import (
@@ -27,49 +33,11 @@ from app.execution.retry_handler import handle_retry
 from app.core.logger import logger
 
 
-def _load_action_configuration(db, action_name: str, workflow_knowledge_id: int | None):
+def execute_retry(db, workflow_execution, step_execution) -> None:
     """
-    Mirror of step_executor._load_action_configuration.
-    Returns (ActionConfiguration | None, execution_type: str).
+    Re-run a RETRY_SCHEDULED step through the full executor pipeline.
+    All outcomes (success, failure, further retry) are handled internally.
     """
-    try:
-        action_def = (
-            db.query(ActionDefinition)
-            .filter(
-                ActionDefinition.name == action_name,
-                ActionDefinition.active.is_(True),
-            )
-            .first()
-        )
-        if action_def is None:
-            return None, "python"
-
-        repo = ActionConfigurationRepository(db)
-
-        if workflow_knowledge_id is not None:
-            config = repo.get_active_configuration(
-                workflow_knowledge_id=workflow_knowledge_id,
-                action_definition_id=action_def.id,
-            )
-        else:
-            config = repo.get_by_action_definition(
-                action_definition_id=action_def.id,
-            )
-
-        if config is None:
-            return None, "python"
-
-        return config, config.execution_type or "python"
-
-    except Exception as e:
-        logger.warning(
-            "retry_executor_config_lookup_failed",
-            extra={"extra_data": {"action_name": action_name, "error": str(e)}},
-        )
-        return None, "python"
-
-
-def execute_retry(db, workflow_execution, step_execution):
     try:
         logger.info(
             "retry_execution_started",
@@ -100,63 +68,55 @@ def execute_retry(db, workflow_execution, step_execution):
             .filter(Workflow.id == workflow_execution.workflow_id)
             .first()
         )
-
         if not workflow:
-            mark_step_failed(
-                db=db,
-                step_execution=step_execution,
-                error="workflow_definition_not_found_on_retry",
-            )
-            mark_workflow_failed(
+            _handle_terminal_failure(
                 db=db,
                 workflow_execution=workflow_execution,
+                step_execution=step_execution,
                 error="workflow_definition_not_found_on_retry",
             )
             return
 
         # Resolve workflow_knowledge_id for ActionConfiguration lookup
-        workflow_knowledge = (
+        wk = (
             db.query(WorkflowKnowledge)
             .filter(WorkflowKnowledge.workflow_name == workflow.name)
             .order_by(WorkflowKnowledge.id.desc())
             .first()
         )
-        workflow_knowledge_id = workflow_knowledge.id if workflow_knowledge else None
+        workflow_knowledge_id = wk.id if wk else None
 
         action = step_execution.step_name
 
-        action_config, execution_type = _load_action_configuration(
+        action_config, execution_type = resolve_action_configuration(
             db=db,
             action_name=action,
             workflow_knowledge_id=workflow_knowledge_id,
         )
 
         if action_config is None:
-            error = (
-                f"No ActionConfiguration found for action '{action}' on retry "
-                f"(workflow_knowledge_id={workflow_knowledge_id})"
+            raise ConfigurationNotFoundError(
+                action_name=action,
+                workflow_knowledge_id=workflow_knowledge_id,
             )
-            logger.error(
-                "retry_executor_no_action_configuration",
-                extra={"extra_data": {
-                    "action":                action,
-                    "workflow_knowledge_id": workflow_knowledge_id,
-                }},
-            )
-            mark_step_failed(db=db, step_execution=step_execution, error=error)
-            handle_retry(
-                db=db,
-                step_execution=step_execution,
-                error=error,
-                workflow_execution=workflow_execution,
-                skip_retry=True,
-            )
-            return
 
-        executor = ExecutorRegistry.get_executor(execution_type)
+        executor = registry_get_executor(execution_type)
         result: ActionResult = executor.execute(
             configuration=action_config,
             context=step_execution.input_payload or {},
+        )
+
+        logger.info(
+            "execution_log",
+            extra={"extra_data": {
+                "workflow_id":           workflow_execution.workflow_id,
+                "workflow_knowledge_id": workflow_knowledge_id,
+                "action_definition_id":  action_config.action_definition_id,
+                "execution_type":        execution_type,
+                "executor":              type(executor).__name__,
+                "success":               result.success,
+                "error":                 result.error if not result.success else None,
+            }},
         )
 
         if result.success:
@@ -166,7 +126,6 @@ def execute_retry(db, workflow_execution, step_execution):
                 output_payload=result.model_dump(),
             )
             finalize_workflow_execution(db=db, workflow_execution=workflow_execution)
-
             logger.info(
                 "retry_execution_completed",
                 extra={"extra_data": {
@@ -176,7 +135,7 @@ def execute_retry(db, workflow_execution, step_execution):
             )
             return
 
-        # Retry failed again — re-enter retry/DLQ decision
+        # Retry failed again — re-enter retry / DLQ decision
         step_error = result.error or str(result.outputs)
         mark_step_failed(db=db, step_execution=step_execution, error=step_error)
         handle_retry(
@@ -187,39 +146,60 @@ def execute_retry(db, workflow_execution, step_execution):
             skip_retry=result.metadata.get("skip_retry", False),
         )
 
-    except Exception as e:
+    except (ConfigurationNotFoundError, ExecutorNotFoundError) as exc:
+        logger.error(
+            "retry_execution_config_error",
+            extra={"extra_data": {
+                "workflow_execution_id": workflow_execution.id,
+                "step_execution_id":     step_execution.id,
+                "error_type":            type(exc).__name__,
+                "error":                 str(exc),
+            }},
+        )
+        mark_step_failed(db=db, step_execution=step_execution, error=str(exc))
+        handle_retry(
+            db=db,
+            step_execution=step_execution,
+            error=str(exc),
+            workflow_execution=workflow_execution,
+            skip_retry=True,
+        )
+
+    except Exception as exc:
         logger.exception(
             "retry_execution_failed",
             extra={"extra_data": {
                 "workflow_execution_id": workflow_execution.id,
                 "step_execution_id":     step_execution.id,
-                "error":                 str(e),
+                "error":                 str(exc),
             }},
         )
-
         try:
             if step_execution.status not in ("FAILED", "DLQ", "COMPLETED"):
-                mark_step_failed(db=db, step_execution=step_execution, error=str(e))
+                mark_step_failed(db=db, step_execution=step_execution, error=str(exc))
                 handle_retry(
                     db=db,
                     step_execution=step_execution,
-                    error=str(e),
+                    error=str(exc),
                     workflow_execution=workflow_execution,
                 )
-
             if workflow_execution.status not in ("FAILED", "COMPLETED"):
                 mark_workflow_failed(
                     db=db,
                     workflow_execution=workflow_execution,
-                    error=str(e),
+                    error=str(exc),
                 )
-
-        except Exception as state_error:
+        except Exception as cleanup_exc:
             logger.error(
                 "retry_execution_state_update_failed",
                 extra={"extra_data": {
                     "workflow_execution_id": workflow_execution.id,
                     "step_execution_id":     step_execution.id,
-                    "error":                 str(state_error),
+                    "error":                 str(cleanup_exc),
                 }},
             )
+
+
+def _handle_terminal_failure(db, workflow_execution, step_execution, error: str) -> None:
+    mark_step_failed(db=db, step_execution=step_execution, error=error)
+    mark_workflow_failed(db=db, workflow_execution=workflow_execution, error=error)

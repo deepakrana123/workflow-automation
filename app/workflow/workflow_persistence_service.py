@@ -16,13 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories import workflow as workflow_repo
 from app.core.logger import logger
-
-
-ALLOWED_DOMAINS = {
-    "finance",
-    "health",
-    "support",
-}
+from app.core.domains import ALLOWED_DOMAINS
 
 
 class WorkflowPersistenceService:
@@ -34,6 +28,8 @@ class WorkflowPersistenceService:
         domain: str,
         user_request: str,
         compile_result: dict,
+        explanation: dict | None = None,
+        workspace_id: int | None = None,
     ) -> dict:
         """
         Persist a compiled workflow to the DB.
@@ -80,6 +76,8 @@ class WorkflowPersistenceService:
             domain=domain,
             raw_input=user_request,
             parsed_rule_json=parsed_rule_json,
+            explanation=explanation,
+            workspace_id=workspace_id,
         )
         db.commit()
         db.refresh(saved)
@@ -100,6 +98,8 @@ class WorkflowPersistenceService:
             "workflow_id": saved.id,
             "name": saved.name,
             "domain": saved.domain,
+            "workspace_id": saved.workspace_id,
             "dsl": dsl,
             "parsed_rule_json": parsed_rule_json,
+            "explanation": explanation,
         }

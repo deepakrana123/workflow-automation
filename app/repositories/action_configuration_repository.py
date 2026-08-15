@@ -9,12 +9,19 @@ class ActionConfigurationRepository:
 
     def create(self, configuration: ActionConfiguration) -> ActionConfiguration:
         self.db.add(configuration)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(configuration)
         return configuration
 
+    def get_by_id(self, configuration_id: int) -> ActionConfiguration | None:
+        return (
+            self.db.query(ActionConfiguration)
+            .filter(ActionConfiguration.id == configuration_id)
+            .first()
+        )
+
     def update(self, configuration: ActionConfiguration) -> ActionConfiguration:
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(configuration)
         return configuration
 
@@ -59,3 +66,16 @@ class ActionConfigurationRepository:
             .order_by(ActionConfiguration.version.desc())
             .first()
         )
+
+    def deactivate_all(
+        self,
+        workflow_knowledge_id: int,
+        action_definition_id: int,
+    ) -> None:
+        """Deactivate all active configs for the given (workflow, action) pair."""
+        self.db.query(ActionConfiguration).filter(
+            ActionConfiguration.workflow_knowledge_id == workflow_knowledge_id,
+            ActionConfiguration.action_definition_id == action_definition_id,
+            ActionConfiguration.active.is_(True),
+        ).update({"active": False})
+        self.db.flush()

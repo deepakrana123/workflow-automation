@@ -143,3 +143,62 @@ def mark_step_blocked(db, step_execution):
         step_execution=step_execution,
         new_status=STEP_STATUS_BLOCKED,
     )
+
+
+def get_step_statuses(db, workflow_execution_id: int) -> list[str]:
+    """Return status values for all steps in a workflow execution."""
+    steps = (
+        db.query(ExecutionStep)
+        .filter(ExecutionStep.workflow_execution_id == workflow_execution_id)
+        .all()
+    )
+    return [step.status for step in steps]
+
+
+def load_execution_progress(db, workflow_execution_id: int) -> dict:
+    """Rebuild DAG progress from persisted step rows.
+
+    Used to resume an execution (after pause / human approval) WITHOUT
+    re-running steps that already ran — the exactly-once guarantee.
+
+    Returns a dict with:
+        completed  — set of step_ids already COMPLETED
+        failed     — set of step_ids already FAILED
+        waiting    — set of step_ids currently WAITING (not reschedulable)
+        outputs    — merged outputs from every completed step (for context)
+    """
+    steps = (
+        db.query(ExecutionStep)
+        .filter(ExecutionStep.workflow_execution_id == workflow_execution_id)
+        .all()
+    )
+
+    completed: set[str] = set()
+    failed: set[str] = set()
+    waiting: set[str] = set()
+    skipped: set[str] = set()
+    outputs: dict = {}
+    step_outputs_by_id: dict[str, dict] = {}
+
+    for step in steps:
+        if step.status == STEP_STATUS_COMPLETED:
+            completed.add(step.step_id)
+            payload = step.output_payload or {}
+            step_outputs = payload.get("outputs") or {}
+            outputs.update(step_outputs)
+            step_outputs_by_id[step.step_id] = step_outputs
+        elif step.status == STEP_STATUS_FAILED:
+            failed.add(step.step_id)
+        elif step.status == STEP_STATUS_WAITING:
+            waiting.add(step.step_id)
+        elif step.status == STEP_STATUS_SKIPPED:
+            skipped.add(step.step_id)
+
+    return {
+        "completed": completed,
+        "failed": failed,
+        "waiting": waiting,
+        "skipped": skipped,
+        "outputs": outputs,
+        "step_outputs": step_outputs_by_id,
+    }

@@ -22,8 +22,8 @@ load_dotenv()
 
 from app.db.session import SessionLocal
 from app.nlp.catalog.matcher import CatalogMatcher
-from app.nlp.catalog.triggerRepository import TriggerDefinitionRepository
-from app.nlp.catalog.actionRepository import ActionDefinitionRepository
+from app.nlp.catalog.trigger_repository import TriggerDefinitionRepository
+from app.nlp.catalog.action_repository import ActionDefinitionRepository
 from app.nlp.suitability.suitability_agent import SuitabilityAgent
 from app.prompting import PromptManager, PromptContext, PromptKey
 from app.semantic.semantic_catalog_retriever import SemanticCatalogRetriever
