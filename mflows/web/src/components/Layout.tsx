@@ -55,6 +55,7 @@ const Layout = () => {
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) =>
+<<<<<<< HEAD
                 clsx(
                   "flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] font-medium transition-colors duration-100",
                   isActive
@@ -115,3 +116,30 @@ const Layout = () => {
 }
 
 export default Layout;
+=======
+                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-white/10 text-white"
+                    : "text-white/60 hover:text-white hover:bg-white/5"
+                }`
+              }
+            >
+              <item.icon size={16} />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="px-5 py-4 border-t border-white/10 text-xs text-white/40">
+          v2.0.0
+        </div>
+      </aside>
+
+      <main className="flex-1 overflow-y-auto bg-gray-50">
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+}
+>>>>>>> e5fd98f2f2bdeb94b60cfd468072036defd97388
