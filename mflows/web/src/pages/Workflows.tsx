@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useGetWorkflowsQuery } from "@/store/api";
 import StatusBadge from "@/components/StatusBadge";
-import { Plus, GitBranch } from "lucide-react";
+import { GitBranch } from "lucide-react";
 
 const Workflows = () => {
   const { data: workflows = [], isLoading } = useGetWorkflowsQuery();
@@ -13,7 +13,10 @@ const Workflows = () => {
           <h1 className="text-xl font-semibold text-gray-900">Workflows</h1>
           <p className="text-sm text-gray-500 mt-0.5">{workflows.length} total</p>
         </div>
-        <Link to="/workflows/generate" className="btn-brand"><Plus size={14} /> New</Link>
+        {/* New workflow button — use workspace-scoped generation instead.
+            Go to Workspaces → select workspace → "Build with AI"
+            <Link to="/workflows/generate" className="btn-brand"><Plus size={14} /> New</Link>
+        */}
       </div>
 
       <div className="card overflow-hidden">

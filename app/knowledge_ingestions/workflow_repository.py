@@ -1,6 +1,6 @@
 from app.models.workflow_knowledge import WorkflowKnowledge
 from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
-from app.models.workflow_action_mapping import WorkflowActionMapping
+from app.models.workflow_action_mapping import WorkflowActionMapping, MappingStatus
 from app.models.workflow_business_rule import WorkflowBusinessRule
 from app.models.workflow_actor import WorkflowActor
 from app.models.workflow_external_system import WorkflowExternalSystem
@@ -115,12 +115,35 @@ class WorkflowRepository:
             .all()
         )
 
+    def mark_action_unmapped(
+        self,
+        mapping_id: int,
+        query_text: str | None = None,
+        top_candidates: list | None = None,
+    ) -> None:
+        """Mark an action as UNMAPPED with optional retrieval diagnostics."""
+        mapping = (
+            self.db.query(WorkflowActionMapping)
+            .filter(WorkflowActionMapping.id == mapping_id)
+            .first()
+        )
+        if mapping is None:
+            return
+        mapping.status = MappingStatus.UNMAPPED
+        if query_text is not None:
+            mapping.query_text = query_text
+        if top_candidates is not None:
+            mapping.top_candidates = top_candidates
+        self.db.flush()
+
     def update_action_mapping(
         self,
         mapping_id: int,
         action_definition_id: int,
         similarity_score: float,
         confidence: float,
+        query_text: str | None = None,
+        top_candidates: list | None = None,
     ) -> None:
         mapping = (
             self.db.query(WorkflowActionMapping)
@@ -130,8 +153,13 @@ class WorkflowRepository:
         if mapping is None:
             return
         mapping.matched_action_definition_id = action_definition_id
-        mapping.similarity_score = similarity_score
-        mapping.confidence = confidence
+        mapping.similarity_score             = similarity_score
+        mapping.confidence                   = confidence
+        mapping.status                       = MappingStatus.MAPPED
+        if query_text is not None:
+            mapping.query_text = query_text
+        if top_candidates is not None:
+            mapping.top_candidates = top_candidates
         self.db.flush()
 
     def update_trigger_mapping(

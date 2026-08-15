@@ -59,13 +59,18 @@ const Dashboard = () => {
 
       {/* Quick actions */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Link to="/workflows/generate" className="card p-4 flex items-center gap-3 hover:shadow-card transition-shadow group">
+        {/* Global generation disabled — workflows are workspace-scoped now.
+        <Link to="/workflows/generate" className="card p-4 flex items-center gap-3 ...">
+          Generate Workflow (global catalog)
+        </Link>
+        */}
+        <Link to="/workspaces" className="card p-4 flex items-center gap-3 hover:shadow-card transition-shadow group">
           <div className="w-9 h-9 rounded-lg bg-brand-50 flex items-center justify-center group-hover:bg-brand-100 transition-colors">
             <GitBranch size={16} className="text-brand-600" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-medium text-gray-900">Generate Workflow</p>
-            <p className="text-2xs text-gray-400">From natural language</p>
+            <p className="text-sm font-medium text-gray-900">Build a Workflow</p>
+            <p className="text-2xs text-gray-400">Select a workspace → AI generation</p>
           </div>
           <ArrowRight size={14} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
         </Link>

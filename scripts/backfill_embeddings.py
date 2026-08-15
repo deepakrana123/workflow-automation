@@ -29,6 +29,7 @@ print(f"Found {len(actions)} actions")
 
 for action in actions:
     text = embedding_service.build_action_text(action)
+    print(text,"text")
 
     vector = embedding_service.generate_embedding(text)
 

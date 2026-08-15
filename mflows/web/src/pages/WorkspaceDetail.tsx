@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   useGetWorkspaceQuery,
@@ -9,6 +9,7 @@ import {
   useGetWorkspaceWorkflowsQuery,
   useGetWorkspaceSynthesisQuery,
   useSynthesizeWorkspaceWorkflowMutation,
+  useUploadBRDMutation,
 } from "@/store/api";
 import { Tabs } from "@/components/shared/Tabs";
 import {
@@ -20,6 +21,7 @@ import {
   ScrollText,
   Sparkles,
   GitBranch,
+  Upload,
 } from "lucide-react";
 
 type TabKey =
@@ -203,35 +205,94 @@ const OverviewTab = ({ wsId, overview }: { wsId: number; overview: any }) => {
 // ── Documents ─────────────────────────────────────────────────────────────────
 
 const DocumentsTab = ({ wsId }: { wsId: number }) => {
-  const { data, isLoading } = useGetWorkspaceDocumentsQuery(wsId);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const { data, isLoading, refetch } = useGetWorkspaceDocumentsQuery(wsId);
+  const [upload, { data: uploadResult, isLoading: uploading, error: uploadError }] = useUploadBRDMutation();
+  const uploadErr = (uploadError as any)?.data?.detail || (uploadError ? "Upload failed" : "");
+
+  function handleUpload() {
+    if (!files.length) return;
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("workspace_id", String(wsId));
+    upload(fd).then(() => { setFiles([]); refetch(); });
+  }
+
   if (isLoading) return <div className="h-24 rounded skeleton" />;
   const docs = data?.documents || [];
 
-  if (docs.length === 0)
-    return <Empty text="No BRDs uploaded to this workspace yet." />;
-
   return (
     <div className="space-y-3">
-      {docs.map((d: any) => (
-        <div key={d.workflow_knowledge_id} className="card p-4">
-          <div className="flex items-center gap-2">
-            <FileText size={14} className="text-brand-600 shrink-0" />
-            <span className="font-medium text-gray-900 text-sm truncate">{d.name}</span>
-            <MappingBadge status={d.mapping_status} />
-            {d.uploaded_at && (
-              <span className="text-2xs text-gray-400 ml-auto">
-                {new Date(d.uploaded_at).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-2xs text-gray-500">
-            <span>Extraction: <b className="text-gray-700">{d.extraction_status}</b></span>
-            <span>Actions: <b className="text-gray-700">{d.mapped_action_count}/{d.action_count}</b> mapped</span>
-            <span>Triggers: <b className="text-gray-700">{d.trigger_count}</b></span>
-            <span>Business rules: <b className="text-gray-700">{d.business_rule_count}</b></span>
-          </div>
+      {/* ── Upload BRDs ── */}
+      <div className="card p-4">
+        <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
+          <Upload size={13} className="text-brand-600" /> Upload BRDs
+        </h3>
+        <div
+          onClick={() => fileRef.current?.click()}
+          className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50/20 transition-all group"
+        >
+          <Upload size={20} className="mx-auto text-gray-300 group-hover:text-brand-400 transition-colors mb-1" />
+          <p className="text-sm text-gray-600">
+            {files.length > 0 ? `${files.length} file(s) selected` : "Click to select PDFs"}
+          </p>
+          <p className="text-2xs text-gray-400 mt-0.5">Multiple PDFs allowed</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
+          />
         </div>
-      ))}
+        {files.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {files.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
+                <FileText size={12} className="text-gray-400" />
+                <span className="truncate">{f.name}</span>
+              </div>
+            ))}
+            <button onClick={handleUpload} disabled={uploading} className="btn-brand mt-2 text-xs">
+              <FileText size={13} /> {uploading ? "Processing..." : "Extract Knowledge"}
+            </button>
+          </div>
+        )}
+        {uploadErr && <p className="text-xs text-danger mt-2">{uploadErr}</p>}
+        {uploadResult && (
+          <p className="text-xs text-success font-medium mt-2">
+            {uploadResult.succeeded}/{uploadResult.total} BRD(s) ingested successfully.
+          </p>
+        )}
+      </div>
+
+      {/* ── Uploaded documents ── */}
+      {docs.length === 0 ? (
+        <Empty text="No BRDs uploaded yet. Use the upload area above." />
+      ) : (
+        docs.map((d: any) => (
+          <div key={d.workflow_knowledge_id} className="card p-4">
+            <div className="flex items-center gap-2">
+              <FileText size={14} className="text-brand-600 shrink-0" />
+              <span className="font-medium text-gray-900 text-sm truncate">{d.name}</span>
+              <MappingBadge status={d.mapping_status} />
+              {d.uploaded_at && (
+                <span className="text-2xs text-gray-400 ml-auto">
+                  {new Date(d.uploaded_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-2xs text-gray-500">
+              <span>Extraction: <b className="text-gray-700">{d.extraction_status}</b></span>
+              <span>Actions: <b className="text-gray-700">{d.mapped_action_count}/{d.action_count}</b> mapped</span>
+              <span>Triggers: <b className="text-gray-700">{d.trigger_count}</b></span>
+              <span>Business rules: <b className="text-gray-700">{d.business_rule_count}</b></span>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 };
