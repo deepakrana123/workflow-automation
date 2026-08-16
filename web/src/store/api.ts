@@ -230,6 +230,10 @@ export const api = createApi({
       query: (workspaceId) => `/workspaces/${workspaceId}/actions`,
       providesTags: ["Workspaces"],
     }),
+    getWorkspaceDiagnostics: builder.query<any, number>({
+      query: (workspaceId) => `/workspaces/${workspaceId}/diagnostics`,
+      providesTags: ["Workspaces"],
+    }),
     getWorkspaceWorkflows: builder.query<any[], number>({
       query: (workspaceId) => `/workflows?workspace_id=${workspaceId}`,
       providesTags: ["Workflows"],
@@ -421,6 +425,7 @@ export const {
   useGetWorkspaceDocumentsQuery,
   useGetWorkspaceBusinessRulesQuery,
   useGetWorkspaceActionsQuery,
+  useGetWorkspaceDiagnosticsQuery,
   useGetWorkspaceWorkflowsQuery,
   useSynthesizeWorkspaceWorkflowMutation,
   useGenerateWorkspaceWorkflowMutation,

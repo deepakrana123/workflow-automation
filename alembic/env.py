@@ -30,6 +30,7 @@ from app.models.workflow_external_system import WorkflowExternalSystem
 from app.models.action_configurations_model import ActionConfiguration
 from app.models.workspace import Workspace
 from app.models.workspace_integration import WorkspaceIntegration
+from app.models.retrieval_eval import EvaluationCase, EvaluationRun, EvaluationResult, EvaluationCandidate
 config = context.config
 
 # Override sqlalchemy.url from .env — never store credentials in alembic.ini

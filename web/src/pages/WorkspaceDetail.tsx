@@ -8,6 +8,7 @@ import {
   useGetWorkspaceActionsQuery,
   useGetWorkspaceWorkflowsQuery,
   useGetWorkspaceSynthesisQuery,
+  useGetWorkspaceDiagnosticsQuery,
   useSynthesizeWorkspaceWorkflowMutation,
   useUploadBRDMutation,
 } from "@/store/api";
@@ -30,15 +31,17 @@ type TabKey =
   | "rules"
   | "actions"
   | "triggers"
-  | "workflows";
+  | "workflows"
+  | "diagnostics";
 
 const TABS: { label: string; value: TabKey }[] = [
-  { label: "Overview", value: "overview" },
-  { label: "Documents", value: "documents" },
+  { label: "Overview",     value: "overview" },
+  { label: "Documents",    value: "documents" },
   { label: "Business Rules", value: "rules" },
-  { label: "Actions", value: "actions" },
-  { label: "Triggers", value: "triggers" },
-  { label: "Workflows", value: "workflows" },
+  { label: "Actions",      value: "actions" },
+  { label: "Triggers",     value: "triggers" },
+  { label: "Workflows",    value: "workflows" },
+  { label: "Diagnostics",  value: "diagnostics" },
 ];
 
 const WorkspaceDetail = () => {
@@ -75,9 +78,10 @@ const WorkspaceDetail = () => {
       {tab === "overview" && <OverviewTab wsId={wsId} overview={overview} />}
       {tab === "documents" && <DocumentsTab wsId={wsId} />}
       {tab === "rules" && <RulesTab wsId={wsId} />}
-      {tab === "actions" && <ActionsTab wsId={wsId} />}
-      {tab === "triggers" && <TriggersTab wsId={wsId} />}
-      {tab === "workflows" && <WorkflowsTab wsId={wsId} />}
+      {tab === "actions"      && <ActionsTab wsId={wsId} />}
+      {tab === "triggers"     && <TriggersTab wsId={wsId} />}
+      {tab === "workflows"    && <WorkflowsTab wsId={wsId} />}
+      {tab === "diagnostics"  && <DiagnosticsTab wsId={wsId} />}
     </div>
   );
 };
@@ -520,5 +524,152 @@ const MappingBadge = ({ status }: { status: string }) => {
     </span>
   );
 };
+
+// ── Diagnostics ────────────────────────────────────────────────────────────────
+
+const DIAG_COLORS: Record<string, string> = {
+  MAPPED:            "text-success",
+  RETRIEVAL_MISS:    "text-danger",
+  MAPPING_REJECTED:  "text-amber-600",
+  PENDING:           "text-gray-400",
+};
+
+const DIAG_LABELS: Record<string, string> = {
+  MAPPED:            "Mapped",
+  RETRIEVAL_MISS:    "Retrieval miss — no candidates returned",
+  MAPPING_REJECTED:  "Candidates retrieved but all below threshold",
+  PENDING:           "Not yet processed",
+};
+
+const DiagnosticsTab = ({ wsId }: { wsId: number }) => {
+  const { data, isLoading } = useGetWorkspaceDiagnosticsQuery(wsId);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  if (isLoading) return <div className="h-24 rounded skeleton" />;
+  if (!data) return <Empty text="No diagnostic data available." />;
+
+  const { totals, brds } = data;
+
+  return (
+    <div className="space-y-4">
+      {/* ── Summary ── */}
+      <div className="card p-5">
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">Pipeline summary</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+          <SumStat label="Extracted" value={totals.extracted_actions} />
+          <SumStat label="Mapped" value={totals.mapped} color="text-success" />
+          <SumStat label="Unmapped" value={totals.unmapped} color="text-danger" />
+          <SumStat label="Retrieval miss" value={totals.retrieval_miss} color="text-danger" />
+          <SumStat label="Rejected" value={totals.mapping_rejected} color="text-amber-600" />
+          <SumStat label="Pending" value={totals.pending} />
+        </div>
+      </div>
+
+      {/* ── Per-BRD action trace ── */}
+      {(brds || []).map((brd: any) => (
+        <div key={brd.workflow_knowledge_id} className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <FileText size={13} className="text-brand-600 shrink-0" />
+            <span className="font-medium text-gray-900 text-sm truncate">
+              {brd.source_document || brd.workflow_name}
+            </span>
+            <span className="text-2xs text-gray-400 ml-auto">{brd.actions.length} actions</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {brd.actions.map((a: any) => {
+              const isOpen = !!expanded[a.mapping_id];
+              const isMapped = a.diagnostic === "MAPPED";
+              return (
+                <div key={a.mapping_id} className="border border-gray-100 rounded-lg overflow-hidden">
+                  {/* Row header */}
+                  <button
+                    onClick={() => setExpanded((e) => ({ ...e, [a.mapping_id]: !e[a.mapping_id] }))}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <span className={`text-sm font-medium ${isMapped ? "text-success" : "text-amber-600"}`}>
+                      {isMapped ? "✓" : "⚠"}
+                    </span>
+                    <span className="text-sm text-gray-800 truncate flex-1">{a.extract_name}</span>
+                    {isMapped && a.matched_action && (
+                      <code className="text-2xs text-gray-500 hidden sm:block">
+                        → {a.matched_action.name}
+                      </code>
+                    )}
+                    {a.confidence != null && (
+                      <span className="text-2xs text-gray-400 ml-2">
+                        {(a.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    <span className="text-2xs text-gray-300">{isOpen ? "▲" : "▼"}</span>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isOpen && (
+                    <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2 bg-gray-50/40">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
+                        <div>
+                          <p className="text-gray-400 uppercase tracking-wide mb-0.5">BRD text</p>
+                          <p className="text-gray-700 italic">"{a.extract_name}"</p>
+                        </div>
+                        {a.description && (
+                          <div>
+                            <p className="text-gray-400 uppercase tracking-wide mb-0.5">Description</p>
+                            <p className="text-gray-600">{a.description}</p>
+                          </div>
+                        )}
+                        {a.query_text && (
+                          <div className="sm:col-span-2">
+                            <p className="text-gray-400 uppercase tracking-wide mb-0.5">Query sent to retrieval</p>
+                            <code className="text-gray-700 bg-gray-100 rounded px-1">{a.query_text}</code>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Diagnostic classification */}
+                      <div className={`text-xs font-medium ${DIAG_COLORS[a.diagnostic] || "text-gray-500"}`}>
+                        {DIAG_LABELS[a.diagnostic] || a.diagnostic}
+                      </div>
+
+                      {/* Top-K candidates */}
+                      {(a.top_candidates || []).length > 0 && (
+                        <div>
+                          <p className="text-2xs text-gray-400 uppercase tracking-wide mb-1">Top candidates</p>
+                          <div className="space-y-0.5">
+                            {a.top_candidates.slice(0, 8).map((c: any, i: number) => (
+                              <div key={i} className="flex items-center gap-2 text-2xs">
+                                <span className="w-4 text-gray-400">{i + 1}.</span>
+                                <span className={`font-medium flex-1 truncate ${i === 0 && isMapped ? "text-success" : "text-gray-700"}`}>
+                                  {c.display_name || c.name}
+                                </span>
+                                {c.confidence != null && (
+                                  <span className="text-gray-500">conf {(c.confidence * 100).toFixed(0)}%</span>
+                                )}
+                                <span className="text-gray-400">rrf {c.rrf_score?.toFixed(4)}</span>
+                                {c.vector_rank && <span className="text-gray-300">v:{c.vector_rank}</span>}
+                                {c.bm25_rank && <span className="text-gray-300">b:{c.bm25_rank}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const SumStat = ({ label, value, color }: { label: string; value: any; color?: string }) => (
+  <div className="card p-3">
+    <p className={`text-sm font-bold ${color || "text-gray-900"}`}>{value ?? 0}</p>
+    <p className="text-2xs text-gray-500 mt-0.5">{label}</p>
+  </div>
+);
 
 export default WorkspaceDetail;

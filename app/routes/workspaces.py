@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from app.schemas.workspace import WorkspaceCreate, WorkspaceResponse
 from app.services import nl_workflow_service
 from app.workflow.workspace_context import WorkspaceContextService
+from app.workflow.workspace_diagnostics import WorkspaceDiagnosticsService
 from app.workflow.workspace_synthesis import WorkspaceSynthesisService
 from app.workflow.workspace_workflow_synthesizer import WorkspaceWorkflowSynthesizer
 
@@ -124,6 +125,18 @@ def get_workspace_actions(workspace_id: int, db: Session = Depends(get_db)):
     """
     _require_workspace(db, workspace_id)
     return WorkspaceContextService().actions(db, workspace_id)
+
+
+@router.get("/{workspace_id}/diagnostics")
+def get_workspace_diagnostics(workspace_id: int, db: Session = Depends(get_db)):
+    """Full per-action pipeline trace for every BRD in the workspace.
+
+    For each extracted action returns: extract_name, query_text, status,
+    confidence, matched_action, top_candidates (top-K with scores), and
+    diagnostic_classification (MAPPED / RETRIEVAL_MISS / MAPPING_REJECTED / PENDING).
+    """
+    _require_workspace(db, workspace_id)
+    return WorkspaceDiagnosticsService().for_workspace(db, workspace_id)
 
 
 @router.get("/{workspace_id}/synthesis")

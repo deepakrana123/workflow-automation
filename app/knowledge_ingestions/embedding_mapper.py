@@ -63,7 +63,9 @@ class EmbeddingMapper:
             # query = combined text for BM25 + Postgres FTS
             query     = f"{action.extract_name} {action.description or ''}"
             # embedding = extract_name only (matches catalog embedding construction)
-            embedding = self._embed(action.extract_name)
+            # query = f"{action.extract_name} {action.description or ''}"
+            query = f"{action.extract_name} {action.description or ''}"
+            embedding = self._embed(query)
 
             # Retrieve full top-K for observability
             all_candidates = self.pipeline.retrieve_actions(
