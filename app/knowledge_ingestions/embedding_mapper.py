@@ -57,14 +57,34 @@ class EmbeddingMapper:
 
     def _embed(self, text: str) -> list[float]:
         return self._model.encode(text, normalize_embeddings=True).tolist()
+    
+    def _build_embedding_text(
+    self,
+    name: str,
+    description: str | None,
+    variant: str = "name_only",
+) -> str:
+    if variant == "name_only":
+        return name
 
-    def map_actions(self) -> None:
+    if variant == "name_description":
+        return f"{name} {description or ''}".strip()
+
+    raise ValueError(f"Unknown embedding variant: {variant}")
+
+    def map_actions(self,embedding_variant: str = "name_only") -> None:
         for action in self.repository.get_unmapped_actions():
             # query = combined text for BM25 + Postgres FTS
-            query     = f"{action.extract_name} {action.description or ''}"
+            # query     = f"{action.extract_name} {action.description or ''}"
             # embedding = extract_name only (matches catalog embedding construction)
             # query = f"{action.extract_name} {action.description or ''}"
-            query = f"{action.extract_name} {action.description or ''}"
+            query = f"{action.extract_name} {action.description or ''}".strip()
+
+        embedding_text = self._build_embedding_text(
+                action.extract_name,
+                action.description,
+                embedding_variant,
+            )
             embedding = self._embed(query)
 
             # Retrieve full top-K for observability

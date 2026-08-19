@@ -70,4 +70,8 @@ class CrossEncoderReRanker:
         """Build the document string shown to the cross-encoder."""
         name = getattr(candidate.entity, "name", "") or ""
         desc = getattr(candidate.entity, "description", "") or ""
-        return f"{name} {desc}".strip()
+        display_name = getattr(candidate.entity, "display_name", "") or ""
+        aliases = getattr(candidate.entity, "aliases", None) or []
+
+        alias_text = " ".join(aliases)
+        return f"{name} {display_name} {alias_text}".strip()

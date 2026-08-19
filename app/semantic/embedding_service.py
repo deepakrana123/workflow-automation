@@ -13,7 +13,7 @@ class EmbeddingService:
         parts = [
             trigger.name.replace("_", " "),
             trigger.display_name or "",
-            trigger.description or "",
+            # trigger.description or "",
             aliases,
         ]
         return " ".join(p for p in parts if p).strip()
@@ -23,7 +23,7 @@ class EmbeddingService:
         parts = [
             action.name.replace("_", " "),
             action.display_name or "",
-            action.description or "",
+            # action.description or "",
             aliases,
         ]
         return " ".join(p for p in parts if p).strip()

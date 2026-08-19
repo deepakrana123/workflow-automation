@@ -48,9 +48,14 @@ class EvaluationService:
         self._model   = SentenceTransformer(_EMBEDDING_MODEL)
         self._confidence_estimator = ConfidenceEstimator()
 
-    def run(self, run_name: str, top_k: int = 20) -> AggregateMetrics:
+    def run(self, run_name: str, top_k: int = 20,
+    embedding_variant: str = "name_only",) -> AggregateMetrics:
         """Execute one full evaluation run against all evaluation_cases."""
         # Create or retrieve the run record
+        if embedding_variant not in {"name_only", "name_description"}:
+            raise ValueError(
+                f"Unknown embedding variant: {embedding_variant}"
+            )
         run = self.db.query(EvaluationRun).filter(EvaluationRun.name == run_name).first()
         if run is not None:
             raise ValueError(
@@ -61,7 +66,7 @@ class EvaluationService:
         run = EvaluationRun(
             name=run_name,
             embedding_model=_EMBEDDING_MODEL,
-            embedding_input_strategy="name_only",
+            embedding_input_strategy=embedding_variant,
             query_strategy="name_description",
             top_k=top_k,
             threshold=0.65,
@@ -76,7 +81,7 @@ class EvaluationService:
         case_metrics_list = []
 
         for case in cases:
-            metrics = self._run_one_case(run, case, top_k)
+            metrics = self._run_one_case(run, case, top_k,embedding_variant)
             case_metrics_list.append(metrics)
 
         self.db.commit()
@@ -91,9 +96,9 @@ class EvaluationService:
                 "mrr": round(agg.mrr, 3),
             }},
         )
-        return agg
+        return agg,
 
-    def _run_one_case(self, run: EvaluationRun, case: EvaluationCase, top_k: int):
+    def _run_one_case(self, run: EvaluationRun, case: EvaluationCase, top_k: int,embedding_variant):
         from app.evaluation_runner.metrics import CaseMetrics
 
         # CATALOG_MISSING — skip retrieval, store placeholder result
@@ -117,8 +122,12 @@ class EvaluationService:
 
         # Build query + embedding (production strategy: name_only for embedding,
         # name + description for BM25/Postgres query)
-        embed_text = case.brd_action
+        # embed_text = case.brd_action
         query_text = f"{case.brd_action} {case.description or ''}".strip()
+        if embedding_variant=="name_only":
+            embed_text = case.brd_action
+        else:
+            embed_text = query_text
         embedding  = self._model.encode(embed_text, normalize_embeddings=True).tolist()
 
         # Retrieve full top-K (no decision filter)
@@ -151,7 +160,33 @@ class EvaluationService:
             }
             for c in candidates
         ]
-
+        from app.evaluation_runner.metrics import get_expected_candidate_diagnostics
+        diagnostics = get_expected_candidate_diagnostics(
+                    candidates=cand_dicts,
+                    expected_action_id=case.expected_action_definition_id,
+                )
+        print(diagnostics,"diagnostics")
+        if diagnostics is not None:
+            print(
+                f"""
+        Expected candidate diagnostics:
+            Action          : {diagnostics["action_name"]}
+            Final rank      : {diagnostics["final_rank"]}
+            Vector rank     : {diagnostics["vector_rank"]}
+            BM25 rank       : {diagnostics["bm25_rank"]}
+            Postgres rank   : {diagnostics["postgres_rank"]}
+            RRF score       : {diagnostics["rrf_score"]:.6f}
+            Cross-encoder   : {diagnostics["cross_encoder_score"]}
+        """
+            )
+        else:
+            print(
+                f"""
+        Expected candidate diagnostics:
+            Expected action ID {case.expected_action_definition_id}
+            NOT FOUND in retrieved candidates
+        """
+            )
         m = compute_case_metrics(
             candidates=cand_dicts,
             expected_action_id=case.expected_action_definition_id,

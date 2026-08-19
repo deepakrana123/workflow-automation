@@ -95,7 +95,8 @@ def cmd_evaluate(args):
         svc = EvaluationService(db=db, pipeline=pipeline)
 
         print(f"Running evaluation: {args.run_name}")
-        agg = svc.run(run_name=args.run_name, top_k=args.top_k)
+        agg = svc.run(run_name=args.run_name, top_k=args.top_k,
+        embedding_variant=args.embedding_variant)
 
         print(f"\nRun complete.")
         print_aggregate(db, args.run_name)
@@ -170,10 +171,17 @@ def main():
     p_compare = sub.add_parser("compare", help="Compare two runs")
     p_compare.add_argument("--run-a", required=True)
     p_compare.add_argument("--run-b", required=True)
+    
 
     # list
     sub.add_parser("list", help="List all evaluation runs")
 
+    p_eval.add_argument(
+    "--embedding-variant",
+    choices=["name_only", "name_description"],
+    default="name_only",
+    help="Text used to create the query embedding",
+)
     args = parser.parse_args()
 
     dispatch = {

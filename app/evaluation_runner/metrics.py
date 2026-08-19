@@ -108,6 +108,31 @@ def compute_case_metrics(
         final_confidence=accepted_confidence,
     )
 
+def get_expected_candidate_diagnostics(
+    candidates: list[dict],
+    expected_action_id: int,
+) -> dict | None:
+    """
+    Find the expected action in the final candidate list and expose
+    its retrieval-stage diagnostics.
+
+    candidates are already ordered by final pipeline rank
+    (after cross-encoder reranking).
+    """
+    for final_rank, candidate in enumerate(candidates, start=1):
+        if candidate.get("action_definition_id") == expected_action_id:
+            return {
+                "final_rank": final_rank,
+                "action_definition_id": candidate.get("action_definition_id"),
+                "action_name": candidate.get("action_name"),
+                "vector_rank": candidate.get("vector_rank"),
+                "bm25_rank": candidate.get("bm25_rank"),
+                "postgres_rank": candidate.get("postgres_rank"),
+                "rrf_score": candidate.get("rrf_score"),
+                "cross_encoder_score": candidate.get("cross_encoder_score"),
+            }
+
+    return None
 
 def aggregate(results: list[CaseMetrics]) -> AggregateMetrics:
     """Aggregate a list of per-case metrics into a run-level summary."""
