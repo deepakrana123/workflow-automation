@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.models.action_definitions import ActionDefinition
 from app.models.trigger_definitions import TriggerDefinition
 from sqlalchemy import func
-from sqlalchemy import String, select
 
 
 class WorkflowRepository:
@@ -215,7 +214,46 @@ class WorkflowRepository:
     #         .all()
     #     )
 
+    # def search_actions_by_postgress(self, query: str, limit: int = 20):
+    #     text_vector = func.to_tsvector(
+    #         "english",
+    #         func.concat(
+    #             func.replace(ActionDefinition.name, "_", " "),
+    #             " ",
+    #             func.coalesce(ActionDefinition.display_name, " "),
+    #             " ",
+    #             func.coalesce(ActionDefinition.description, " ")
+    #         ),
+    #     )
+    #     alias_vector = func.jsonb_to_tsvector(
+    #         "english",
+    #         func.coalesce(ActionDefinition.aliases, "[]"),
+    #         '["string"]',
+    #     )
+    #     vector = text_vector.op("||")(alias_vector)
+    #     ts_query = func.plainto_tsquery("english", query)
+    #     rank = func.ts_rank(vector, ts_query)
+    #     return (
+    #         self.db.query(ActionDefinition, rank.label("rank"))
+    #         .filter(vector.op("@@")(ts_query))
+    #         .order_by(rank.desc())
+    #         .limit(limit)
+    #         .all()
+    #     )
+
     def search_actions_by_postgress(self, query: str, limit: int = 20):
+        """Full-text search over actions using websearch_to_tsquery.
+
+        websearch_to_tsquery handles long descriptive BRD queries naturally:
+        - multiple words → AND by default (all tokens must appear)
+        - no strict ordering required (unlike phraseto_tsquery)
+        - supports quoted phrases, OR, - negation without SQL errors
+
+        This gives the best recall for queries like:
+        "Apply the applicable interest rate to the loan account"
+        → tokens 'apply', 'interest', 'rate', 'loan', 'account' all searched
+        → apply_interest matches on 'apply' + 'interest' in name + description
+        """
         text_vector = func.to_tsvector(
             "english",
             func.concat(
@@ -223,59 +261,63 @@ class WorkflowRepository:
                 " ",
                 func.coalesce(ActionDefinition.display_name, " "),
                 " ",
-                func.coalesce(ActionDefinition.description, " ")
-                # func.coalesce(ActionDefinition.description, " "),
+                func.coalesce(ActionDefinition.description, " "),
             ),
         )
 
         alias_vector = func.jsonb_to_tsvector(
             "english",
-            func.coalesce(
-                ActionDefinition.aliases,
-                "[]",
-            ),
+            func.coalesce(ActionDefinition.aliases, "[]"),
             '["string"]',
         )
 
         vector = text_vector.op("||")(alias_vector)
 
-        ts_query = func.plainto_tsquery("english", query)
+        ts_query = func.websearch_to_tsquery("english", query)
 
         rank = func.ts_rank(vector, ts_query)
 
         return (
-            self.db.query(
-                ActionDefinition,
-                rank.label("rank"),
-            )
+            self.db.query(ActionDefinition, rank.label("rank"))
             .filter(vector.op("@@")(ts_query))
             .order_by(rank.desc())
             .limit(limit)
             .all()
         )
 
+    # def search_triggers_by_postgress(self, query: str, limit: int = 20):
+    #     text_vector = func.to_tsvector(
+    #         "english",
+    #         func.concat(
+    #             func.replace(TriggerDefinition.name, "_", " "),
+    #             " ",
+    #             func.coalesce(TriggerDefinition.display_name, " "),
+    #             " ",
+    #             func.coalesce(TriggerDefinition.description, " "),
+    #         ),
+    #     )
+    #     alias_vector = func.jsonb_to_tsvector(
+    #         "english",
+    #         func.coalesce(TriggerDefinition.aliases, "[]"),
+    #         '["string"]',
+    #     )
+    #     vector = text_vector.op("||")(alias_vector)
+    #     query = func.plainto_tsquery("english", query)
+#     rank = func.ts_rank(vector, query)
+    #     return (
+    #         self.db.query(TriggerDefinition, rank.label("rank"))
+    #         .filter(vector.op("@@")(query))
+    #         .order_by(rank.desc())
+    #         .limit(limit)
+    #         .all()
+    #     )
+
     def search_triggers_by_postgress(self, query: str, limit: int = 20):
-        # alias_text = (
-        #         select(
-        #             func.string_agg(
-        #                 func.jsonb_array_elements_text(ActionDefinition.aliases),
-        #                 " "
-        #             )
-        #         )
-        #         .scalar_subquery()
-        #     )
-        # vector = func.to_tsvector(
-        #     "english",
-        #     func.concat(
-        #         TriggerDefinition.name,
-        #         " ",
-        #         # TriggerDefinition.display_name,
-        #         # func.coalesce(TriggerDefinition.description, " "),
-        #         func.coalesce(TriggerDefinition.display_name, " "),
-        #         " ",
-        #         func.coalesce(TriggerDefinition.aliases.cast(String), " "),
-        #     ),
-        # )
+        """Full-text search over triggers using websearch_to_tsquery.
+
+        Mirrors search_actions_by_postgress — flexible AND-by-default matching
+        handles multi-word trigger queries without requiring exact phrase order.
+        """
         text_vector = func.to_tsvector(
             "english",
             func.concat(
@@ -283,25 +325,25 @@ class WorkflowRepository:
                 " ",
                 func.coalesce(TriggerDefinition.display_name, " "),
                 " ",
-                func.coalesce(TriggerDefinition.description, " ")
-                # func.coalesce(TriggerDefinition.description, " "),
+                func.coalesce(TriggerDefinition.description, " "),
             ),
         )
 
         alias_vector = func.jsonb_to_tsvector(
             "english",
-            func.coalesce(
-                TriggerDefinition.aliases,
-                "[]",
-            ),
+            func.coalesce(TriggerDefinition.aliases, "[]"),
             '["string"]',
         )
+
         vector = text_vector.op("||")(alias_vector)
-        query = func.plainto_tsquery("english", query)
-        rank = func.ts_rank(vector, query)
+
+        ts_query = func.websearch_to_tsquery("english", query)
+
+        rank = func.ts_rank(vector, ts_query)
+
         return (
             self.db.query(TriggerDefinition, rank.label("rank"))
-            .filter(vector.op("@@")(query))
+            .filter(vector.op("@@")(ts_query))
             .order_by(rank.desc())
             .limit(limit)
             .all()

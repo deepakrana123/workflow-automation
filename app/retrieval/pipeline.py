@@ -132,26 +132,26 @@ class RetrievalPipeline:
         vector_results = self._vector.search_actions(embedding, limit=limit)
         keyword_results = self._keyword.search_actions(query, limit=limit)
         postgres_results = self._postgres.search_actions(query, limit=limit)
-        # fused = self._rrf.fuse(vector_results, keyword_results, postgres_results)
-        # return self._cross.rerank(query, fused)
+        fused = self._rrf.fuse(vector_results, keyword_results, postgres_results)
+        return self._cross.rerank(query, fused)
 
-        print("\nPOSTGRES RESULTS:")
-        for i, c in enumerate(postgres_results, 1):
-            print(
-                i,
-                c.entity.id,
-                c.entity.name,
-                c.score,
-                c.source,
-            )
+        # print("\nPOSTGRES RESULTS:")
+        # for i, c in enumerate(postgres_results, 1):
+        #     print(
+        #         i,
+        #         c.entity.id,
+        #         c.entity.name,
+        #         c.score,
+        #         c.source,
+        #     )
 
-        fused = self._rrf.fuse(
-                vector_results,
-                keyword_results,
-                postgres_results,
-            )
+        # fused = self._rrf.fuse(
+        #         vector_results,
+        #         keyword_results,
+        #         postgres_results,
+        #     )
 
-        return fused
+        # return fused
         # return self._rrf.fuse(vector_results, keyword_results, postgres_results)
 
     def _retrieve_and_rank_triggers(
@@ -164,7 +164,6 @@ class RetrievalPipeline:
         keyword_results = self._keyword.search_triggers(query, limit=limit)
         postgres_results = self._postgres.search_triggers(query, limit=limit)
         # fused = self._rrf.fuse(vector_results, keyword_results, postgres_results)
-        # return self._cross.rerank(query, fused)
         print("\nPOSTGRES RESULTS:")
         for i, c in enumerate(postgres_results, 1):
             print(
@@ -181,5 +180,6 @@ class RetrievalPipeline:
                 postgres_results,
             )
 
-        return fused
+        # return fused
         # return self._rrf.fuse(vector_results, keyword_results, postgres_results)
+        return self._cross.rerank(query, fused)

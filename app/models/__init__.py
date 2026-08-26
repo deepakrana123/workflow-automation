@@ -25,6 +25,8 @@ from app.models.retrieval_eval import (
     EvaluationResult,
     EvaluationCandidate,
 )
+from app.models.business_rule_definition import BusinessRuleDefinition
+from app.models.role_assignment import RoleAssignment
 
 __all__ = [
     "Workflow", "WorkflowRun", "WorkflowExecution", "ExecutionStep",
@@ -34,4 +36,5 @@ __all__ = [
     "WorkflowTriggerMapping", "WorkflowBusinessRule", "WorkflowActor",
     "WorkflowExternalSystem", "ActionConfiguration", "WorkspaceIntegration",
     "EvaluationCase", "EvaluationRun", "EvaluationResult", "EvaluationCandidate",
+    "BusinessRuleDefinition", "RoleAssignment",
 ]

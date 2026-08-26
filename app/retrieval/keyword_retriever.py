@@ -21,7 +21,19 @@ class KeywordRetriever:
     def _build_index(self, objects) -> BM25Okapi | None:
         if not objects:
             return None
-        corpus = [self._tokenize(f"{a.name} {a.description or ''}") for a in objects]
+        corpus = [
+            self._tokenize(
+                # name: underscores → spaces so "apply_interest" → "apply interest"
+                f"{a.name.replace('_', ' ')} "
+                # display_name: human-readable label, often closer to BRD vocabulary
+                f"{a.display_name or ''} "
+                # aliases: alternative names extracted from BRDs / catalog seeding
+                f"{' '.join(a.aliases or [])} "
+                # description: long-form text, richest vocabulary overlap with BRD queries
+                f"{a.description or ''}"
+            )
+            for a in objects
+        ]
         return BM25Okapi(corpus)
 
     def search_actions(self, query: str, limit: int = 20) -> list[RetrievalCandidate]:

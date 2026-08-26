@@ -10,6 +10,7 @@ MAX_WORKERS = 5
 
 
 def handle_event(payload: dict):
+    print(payload, "hlo12345")
     db = SessionLocal()
     try:
         workflow_execution_id = payload.get("workflow_execution_id")
@@ -40,6 +41,7 @@ def worker():
             continue
         _, event_data = item
         payload = json.loads(event_data)
+        print(item, event_data, payload)
         executor.submit(handle_event, payload)
 
 

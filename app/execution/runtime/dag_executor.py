@@ -127,6 +127,20 @@ def run_dag_execution(
                 )
                 continue
 
+            # A rule-blocked step pauses the DAG. Not retried — policy hold.
+            if result.get("blocked"):
+                waiting_steps.add(step_id)
+                workflow_waiting = True
+                logger.info(
+                    "dag_step_rule_blocked",
+                    extra={"extra_data": {
+                        "workflow_execution_id": workflow_execution.id,
+                        "step_id": step_id,
+                        "rule_evaluation": result.get("rule_evaluation"),
+                    }},
+                )
+                continue
+
             if result["success"]:
                 completed_steps.add(step_id)
                 outputs = _extract_outputs(result.get("result"))

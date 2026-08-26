@@ -5,7 +5,6 @@ import {
   GitBranch,
   Play,
   Search,
-  // FileUp, // Ingestion nav removed — upload lives inside workspace Documents tab
   BarChart3,
   Activity,
   Sparkles,
@@ -15,6 +14,9 @@ import {
   Bell,
   ChevronDown,
   CheckSquare,
+  Zap,
+  Shield,
+  BookOpen,
 } from "lucide-react";
 import { clsx } from "clsx";
 
@@ -25,14 +27,19 @@ const nav = [
   { to: "/executions", label: "Executions", icon: Play },
   { to: "/human-tasks", label: "Human Tasks", icon: CheckSquare },
   { to: "/catalog", label: "Catalog", icon: Search },
-  // { to: "/knowledge", label: "Ingestion", icon: FileUp },
-  // BRD upload is now inside each workspace — Workspaces → Documents tab
   { to: "/traces", label: "Traces", icon: Activity },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/prompts", label: "Prompts", icon: Sparkles },
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/configurations", label: "Config", icon: Wrench },
   { to: "/settings", label: "Health", icon: Heart },
+];
+
+const runtimeNav = [
+  { to: "/runtime/workflows", label: "RT: Workflows", icon: Zap },
+  { to: "/runtime/retrieval", label: "RT: Retrieval", icon: BookOpen },
+  { to: "/runtime/rules", label: "RT: Rules", icon: Shield },
+  { to: "/runtime/rbac", label: "RT: RBAC", icon: Shield },
 ];
 
 const Layout = () => {
@@ -60,6 +67,34 @@ const Layout = () => {
                   "flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] font-medium transition-colors duration-100",
                   isActive
                     ? "bg-gray-100 text-gray-900"
+                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <item.icon size={16} strokeWidth={isActive ? 2.2 : 1.8} className="shrink-0" />
+                  <span>{item.label}</span>
+                </>
+              )}
+            </NavLink>
+          ))}
+
+          {/* Runtime section */}
+          <div className="pt-3 pb-1">
+            <p className="px-2.5 text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
+              Runtime
+            </p>
+          </div>
+          {runtimeNav.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  "flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] font-medium transition-colors duration-100",
+                  isActive
+                    ? "bg-blue-50 text-blue-800"
                     : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
                 )
               }

@@ -38,6 +38,8 @@ def create_human_task(
     prompt: str | None,
     on_timeout: str | None,
     timeout_seconds: int | None,
+    allowed_roles: list | None = None,
+    escalation_policy: dict | None = None,
 ) -> HumanTask:
     """Create a PENDING human task for a suspended step."""
     timeout_at = None
@@ -52,6 +54,9 @@ def create_human_task(
         status=STATUS_PENDING,
         on_timeout=on_timeout,
         timeout_at=timeout_at,
+        allowed_roles=allowed_roles or [],
+        escalation_policy=escalation_policy,
+        escalation_level=0,
     )
     db.add(task)
     db.commit()

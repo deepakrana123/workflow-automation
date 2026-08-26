@@ -32,3 +32,8 @@ class Workflow(Base):
     priority = Column(Integer, default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ── Skill file reference (migration c1d2e3f4a5b6) ─────────────────────────
+    # Set by SkillFileGenerator after workflow is published.
+    skill_file_id   = Column(String(255), nullable=True)
+    skill_file_path = Column(String(500), nullable=True)

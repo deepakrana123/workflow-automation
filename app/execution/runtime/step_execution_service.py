@@ -189,7 +189,9 @@ def load_execution_progress(db, workflow_execution_id: int) -> dict:
             step_outputs_by_id[step.step_id] = step_outputs
         elif step.status == STEP_STATUS_FAILED:
             failed.add(step.step_id)
-        elif step.status == STEP_STATUS_WAITING:
+        elif step.status in (STEP_STATUS_WAITING, STEP_STATUS_BLOCKED):
+            # BLOCKED is treated identically to WAITING on resume:
+            # the step is not re-executed until the block is cleared.
             waiting.add(step.step_id)
         elif step.status == STEP_STATUS_SKIPPED:
             skipped.add(step.step_id)

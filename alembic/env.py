@@ -31,6 +31,8 @@ from app.models.action_configurations_model import ActionConfiguration
 from app.models.workspace import Workspace
 from app.models.workspace_integration import WorkspaceIntegration
 from app.models.retrieval_eval import EvaluationCase, EvaluationRun, EvaluationResult, EvaluationCandidate
+from app.models.business_rule_definition import BusinessRuleDefinition
+from app.models.role_assignment import RoleAssignment
 config = context.config
 
 # Override sqlalchemy.url from .env — never store credentials in alembic.ini

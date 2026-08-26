@@ -56,12 +56,53 @@ def list_workspaces(active_only: bool = True, db: Session = Depends(get_db)):
 
 @router.post("", response_model=WorkspaceResponse, status_code=201)
 def create_workspace(body: WorkspaceCreate, db: Session = Depends(get_db)):
-    """Create a workspace (one banking project)."""
+    """Create a workspace at a specific level in the bank hierarchy.
+
+    Rules:
+      - global   → parent_id must be None
+      - region   → parent_id must point to a global workspace
+      - zone     → parent_id must point to a region workspace
+      - branch   → parent_id must point to a zone workspace
+    """
+    from app.models.workspace import WORKSPACE_LEVELS, _PARENT_LEVEL
+
+    # Validate parent exists and is the correct level (service-layer enforcement)
+    if body.level != "global" and body.parent_id is not None:
+        parent = db.query(Workspace).filter(Workspace.id == body.parent_id).first()
+        if parent is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent workspace {body.parent_id} not found.",
+            )
+        expected_parent_level = _PARENT_LEVEL[body.level]
+        if parent.level != expected_parent_level:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"A '{body.level}' workspace must have a '{expected_parent_level}' parent. "
+                    f"Workspace {body.parent_id} is '{parent.level}'."
+                ),
+            )
+
+    # Enforce single global workspace per deployment
+    if body.level == "global":
+        existing_global = (
+            db.query(Workspace).filter(Workspace.level == "global").first()
+        )
+        if existing_global is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A global workspace already exists (id={existing_global.id}). "
+                       "Only one global workspace is allowed per deployment.",
+            )
+
     workspace = Workspace(
         name=body.name,
         display_name=body.display_name,
         description=body.description,
         organization_name=body.organization_name,
+        level=body.level,
+        parent_id=body.parent_id,
         active=True,
     )
     db.add(workspace)

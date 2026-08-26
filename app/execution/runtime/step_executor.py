@@ -22,6 +22,7 @@ from app.execution.runtime.step_execution_service import (
     mark_step_failed,
     mark_step_running,
     mark_step_waiting,
+    mark_step_blocked,
 )
 from app.execution.executors.constants import EXECUTION_STATUS_WAITING
 from app.repositories import human_task_repo
@@ -35,6 +36,10 @@ from app.execution.exceptions import (
 )
 from app.execution.retry_handler import handle_retry
 from app.repositories.step_retry_history_repo import record_retry_history
+from app.execution.rules.step_rule_evaluator import (
+    evaluate_step_rules,
+    build_metadata_entry,
+)
 from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
 from app.core.tracing import build_log_context, generate_span_id, inject_trace_into_payload
@@ -48,6 +53,7 @@ _CP_MARK_RUNNING   = "mark_step_running"
 _CP_TRACE_STARTED  = "record_step_started"
 _CP_INJECT_TRACE   = "inject_trace_into_payload"
 _CP_LOAD_CONFIG    = "load_action_configuration"
+_CP_RULE_CHECK     = "rule_evaluation"              # NEW
 _CP_DISPATCH       = "executor_dispatch"
 _CP_MARK_COMPLETED = "mark_step_completed"
 _CP_MARK_FAILED    = "mark_step_failed"
@@ -151,12 +157,49 @@ def execute_workflow_step(
             action_name=action,
             workflow_knowledge_id=workflow_knowledge_id,
         )
+        print(workflow_knowledge_id,action,"hlo")
 
         if action_config is None:
             raise ConfigurationNotFoundError(
                 action_name=action,
                 workflow_knowledge_id=workflow_knowledge_id,
             )
+
+        # ── CHECKPOINT: rule_evaluation ──────────────────────────────────────
+        # Evaluate business_rules[] attached to this step against the current
+        # WorkflowContext (passed in via payload). This is the policy boundary:
+        # if a rule blocks, the step halts with RULE_BLOCKED — not FAILED.
+        # RULE_BLOCKED is not retried (policy hold, not transient error).
+        checkpoint = _CP_RULE_CHECK
+        context_outputs = {k: v for k, v in (payload or {}).items()
+                           if not k.startswith("_")}
+        eval_result = evaluate_step_rules(
+            step_definition=step_definition,
+            context_outputs=context_outputs,
+        )
+        if not eval_result.passed:
+            metadata_entry = build_metadata_entry(eval_result)
+            mark_step_blocked(
+                db=db,
+                step_execution=step_execution,
+            )
+            # Store rule evaluation result in output_payload so it's queryable
+            step_execution.output_payload = {"rule_evaluations": metadata_entry}
+            db.commit()
+            logger.info(
+                "step_rule_blocked_halting",
+                extra={
+                    "extra_data": build_log_context(
+                        workflow_execution=workflow_execution,
+                        execution_step=step_execution,
+                        extra={
+                            "action":            action,
+                            "blocking_rule":     metadata_entry.get("blocking_rule"),
+                        },
+                    )
+                },
+            )
+            return {"success": False, "blocked": True, "rule_evaluation": metadata_entry}
 
         # ── CHECKPOINT: executor_dispatch ────────────────────────────────────
         checkpoint = _CP_DISPATCH
@@ -193,6 +236,19 @@ def execute_workflow_step(
             mark_step_waiting(db=db, step_execution=step_execution)
 
             spec = result.metadata.get("human_task", {}) or {}
+
+            # Collect allowed_roles from the step's business_rules
+            # (populated by RuleInjector) or from the human_task spec itself.
+            step_allowed_roles: list[str] = []
+            for br in step_definition.get("business_rules") or []:
+                step_allowed_roles.extend(br.get("allowed_roles") or [])
+            # Also accept explicit override in the human_task spec
+            if spec.get("allowed_roles"):
+                step_allowed_roles = spec["allowed_roles"]
+            # Deduplicate, preserve order
+            seen: set[str] = set()
+            deduped_roles = [r for r in step_allowed_roles if not (r in seen or seen.add(r))]
+
             human_task = human_task_repo.create_human_task(
                 db=db,
                 workflow_execution_id=workflow_execution.id,
@@ -201,6 +257,8 @@ def execute_workflow_step(
                 prompt=spec.get("prompt"),
                 on_timeout=spec.get("on_timeout"),
                 timeout_seconds=spec.get("timeout_seconds"),
+                allowed_roles=deduped_roles,
+                escalation_policy=spec.get("escalation_policy"),
             )
 
             logger.info(

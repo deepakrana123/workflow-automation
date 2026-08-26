@@ -370,6 +370,63 @@ export const api = createApi({
       }),
       invalidatesTags: ["Health"],
     }),
+
+    // ── Runtime ───────────────────────────────────────────────────────────
+    getRuntimeWorkflows: builder.query<any, { userId: string; workspaceId: string }>({
+      query: ({ userId, workspaceId }) => ({
+        url: "/runtime/workflows",
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+      providesTags: ["Workflows"],
+    }),
+    getRuntimeExecution: builder.query<any, { id: string; userId: string; workspaceId: string }>({
+      query: ({ id, userId, workspaceId }) => ({
+        url: `/runtime/executions/${id}`,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    getRuntimeExecutionSteps: builder.query<any, { id: string; userId: string; workspaceId: string }>({
+      query: ({ id, userId, workspaceId }) => ({
+        url: `/runtime/executions/${id}/steps`,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    runtimeRetrieve: builder.mutation<any, { body: any; userId: string; workspaceId: string }>({
+      query: ({ body, userId, workspaceId }) => ({
+        url: "/runtime/retrieve",
+        method: "POST",
+        body,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    runtimeExecuteAction: builder.mutation<any, { body: any; userId: string; workspaceId: string }>({
+      query: ({ body, userId, workspaceId }) => ({
+        url: "/runtime/execute",
+        method: "POST",
+        body,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    runtimeGlobalSearch: builder.mutation<any, { body: any; userId: string; workspaceId: string }>({
+      query: ({ body, userId, workspaceId }) => ({
+        url: "/runtime/search",
+        method: "POST",
+        body,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    getRuntimeRBACMe: builder.query<any, { userId: string; workspaceId: string }>({
+      query: ({ userId, workspaceId }) => ({
+        url: "/runtime/rbac/me",
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
+    getRuntimeRules: builder.query<any, { workspaceId: string; userId: string }>({
+      query: ({ workspaceId, userId }) => ({
+        url: `/runtime/rules/${workspaceId}`,
+        headers: { "X-User-Id": userId, "X-Workspace-Id": workspaceId },
+      }),
+    }),
   }),
 });
 
@@ -456,4 +513,13 @@ export const {
   useGetSystemHealthQuery,
   useGetProviderHealthQuery,
   useResetProviderMutation,
+  // Runtime
+  useGetRuntimeWorkflowsQuery,
+  useGetRuntimeExecutionQuery,
+  useGetRuntimeExecutionStepsQuery,
+  useRuntimeRetrieveMutation,
+  useRuntimeExecuteActionMutation,
+  useRuntimeGlobalSearchMutation,
+  useGetRuntimeRBACMeQuery,
+  useGetRuntimeRulesQuery,
 } = api;

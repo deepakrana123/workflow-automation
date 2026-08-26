@@ -7,7 +7,7 @@ Commands:
   import-cases              Import seed evaluation cases into the DB
   evaluate --run-name NAME  Run one evaluation experiment
   report   --run-name NAME  Print aggregate + per-case report for a run
-  compare  --run-a A --run-b B  Compare two runs side by side
+compare  --run-a A --run-b B  Compare two runs side by side
   list                      List all evaluation runs
 
 Usage examples:
@@ -28,8 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 load_dotenv()
 
-# Ensure all SQLAlchemy models are registered before any query is made
-import app.db.base  # noqa: F401 — side-effect: registers all models with Base
 
 from app.db.session import SessionLocal
 from app.evaluation_runner.importer import import_cases

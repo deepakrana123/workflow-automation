@@ -4,13 +4,14 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
-    ForeignKey
+    Text,
+    ForeignKey,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.base import Base
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
+
 
 class WorkspaceIntegration(Base):
     __tablename__ = "workspace_integrations"
@@ -25,28 +26,33 @@ class WorkspaceIntegration(Base):
 
     name = Column(String, nullable=False)
 
-    provider = Column(String, nullable=False)
-
-    integration_type = Column(
+    provider_type = Column(
         String,
         nullable=False,
     )  # http, soap, grpc, kafka, mcp
 
     base_url = Column(String, nullable=True)
 
-    authentication = Column(JSONB, nullable=False, default=dict)
+    authentication_type = Column(
+        String,
+        nullable=False,
+    )  # api_key, bearer, oauth2, basic
 
     credentials = Column(JSONB, nullable=False, default=dict)
+
+    description = Column(Text, nullable=True)
 
     active = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
     )
 
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+        nullable=False,
     )

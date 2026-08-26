@@ -20,6 +20,9 @@ from app.routes.workspace_integrations import router as workspace_integrations_r
 from app.routes.action_configurations import router as action_configurations_router
 from app.routes.human_tasks import router as human_tasks_router
 from app.routes.workspaces import router as workspaces_router
+from app.routes.capabilities import router as capabilities_router
+from app.routes.rbac import router as rbac_router
+from app.routes.runtime import router as runtime_router
 from app.core import startup as startup_module
 
 
@@ -65,6 +68,9 @@ app.include_router(workspace_integrations_router, prefix="/api")
 app.include_router(action_configurations_router, prefix="/api")
 app.include_router(human_tasks_router, prefix="/api")
 app.include_router(workspaces_router, prefix="/api")
+app.include_router(capabilities_router, prefix="/api")
+app.include_router(rbac_router, prefix="/api")
+app.include_router(runtime_router, prefix="/api")
 
 
 @app.get("/")

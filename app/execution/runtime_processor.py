@@ -18,11 +18,13 @@ from app.core.logger import logger
 
 
 def runtime_processor(db, workflow_execution_id: int):
+    print(workflow_execution_id,"workflow_execution_id")
     workflow_execution = (
         db.query(WorkflowExecution)
         .filter(WorkflowExecution.id == workflow_execution_id)
         .first()
     )
+    print(workflow_execution,workflow_execution_id,"hlo hillo ")
 
     if not workflow_execution:
         logger.warning(
@@ -122,12 +124,14 @@ def runtime_processor(db, workflow_execution_id: int):
         # Used downstream to load ActionConfiguration by
         # (workflow_knowledge_id, action_definition_id).
         # None when no BRD ingestion record exists for this workflow.
+        print(workflow,"workflow")
         workflow_knowledge = (
             db.query(WorkflowKnowledge)
             .filter(WorkflowKnowledge.workflow_name == workflow.name)
             .order_by(WorkflowKnowledge.id.desc())
             .first()
         )
+        print(workflow_knowledge,"print hlow")
         workflow_knowledge_id = workflow_knowledge.id if workflow_knowledge else None
 
         if workflow_knowledge_id:

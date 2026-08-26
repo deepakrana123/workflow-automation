@@ -54,6 +54,23 @@ def _ingest_one(
             workspace_id=workspace_id,
             source_document=file.filename,
         )
+
+        # Automatically extract structured rules and role shapes from
+        # the newly ingested BRD. Idempotent — safe to run every ingest.
+        try:
+            from app.rbac.rule_extractor import RuleExtractionService
+            RuleExtractionService().extract_for_workspace(db=db, workspace_id=workspace_id)
+        except Exception as extract_exc:
+            # Extraction failure must not abort ingestion — log and continue.
+            logger.warning(
+                "rule_extraction_after_ingest_failed",
+                extra={"extra_data": {
+                    "workspace_id": workspace_id,
+                    "filename": file.filename,
+                    "error": str(extract_exc),
+                }},
+            )
+
         logger.info(
             "knowledge_ingestion_success",
             extra={"extra_data": {
