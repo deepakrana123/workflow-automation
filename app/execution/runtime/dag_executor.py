@@ -33,7 +33,7 @@ def _record_skipped(db, workflow_execution, step_def, step_id):
             step_id=step_id,
         )
         mark_step_skipped(db=db, step_execution=se)
-    except Exception as exc:  # noqa: BLE001 - skip recording must not break the DAG
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "dag_skip_record_failed",
             extra={"extra_data": {
@@ -49,22 +49,17 @@ def run_dag_execution(
     workflow_execution,
     dag,
     payload,
-    workflow_knowledge_id: int | None = None,
+    workspace_id: int | None = None,
 ):
     steps = dag.get("steps", [])
     steps_by_id = {s["id"]: s for s in steps}
 
-    # Rehydrate progress from persisted step rows so a resumed execution
-    # (after pause / human approval) continues from where it stopped and
-    # never re-runs completed steps (exactly-once).
-    progress = load_execution_progress(db, workflow_execution.id)
+    progress      = load_execution_progress(db, workflow_execution.id)
     completed_steps = progress["completed"]
     failed_steps    = progress["failed"]
     waiting_steps   = progress["waiting"]
     skipped_steps   = progress.get("skipped", set())
 
-    # WorkflowContext accumulates outputs — seeded from rehydrated per-step
-    # outputs so rule routing can read a parent's output after a resume.
     context = WorkflowContext()
     context.outputs.update(progress["outputs"])
     for sid, outs in progress.get("step_outputs", {}).items():
@@ -82,7 +77,6 @@ def run_dag_execution(
         if not ready_steps:
             break
 
-        # Sequential path
         if len(ready_steps) == 1:
             step = ready_steps[0]
             results = [
@@ -93,18 +87,16 @@ def run_dag_execution(
                         workflow_execution=workflow_execution,
                         step_definition=step,
                         payload=payload,
-                        workflow_knowledge_id=workflow_knowledge_id,
+                        workspace_id=workspace_id,
                     ),
                 }
             ]
-
-        # Parallel path
         else:
             results = execute_parallel_steps(
                 workflow_execution_id=workflow_execution.id,
                 ready_steps=ready_steps,
                 payload=payload,
-                workflow_knowledge_id=workflow_knowledge_id,
+                workspace_id=workspace_id,
             )
 
         workflow_failed  = False
@@ -114,7 +106,6 @@ def run_dag_execution(
             step_id = item["step_id"]
             result  = item["result"]
 
-            # A human_task step suspends the DAG: neither completed nor failed.
             if result.get("waiting"):
                 waiting_steps.add(step_id)
                 workflow_waiting = True
@@ -127,7 +118,6 @@ def run_dag_execution(
                 )
                 continue
 
-            # A rule-blocked step pauses the DAG. Not retried — policy hold.
             if result.get("blocked"):
                 waiting_steps.add(step_id)
                 workflow_waiting = True
@@ -146,9 +136,15 @@ def run_dag_execution(
                 outputs = _extract_outputs(result.get("result"))
                 context.update_step(step_id, outputs)
 
-                # ── Rule engine: parent decides children ────────────────────
-                # Only steps carrying a `routing` spec trigger branching; all
-                # other (linear) steps behave exactly as before.
+                # ── Cross-workflow dispatch on success ────────────────────
+                _handle_chain_dispatch(
+                    db=db,
+                    step_definition=steps_by_id.get(step_id, {}),
+                    outputs=outputs,
+                    workflow_execution=workflow_execution,
+                    dispatch_type="success",
+                )
+
                 routing = steps_by_id.get(step_id, {}).get("routing")
                 if routing:
                     activated = resolve_activated_children(routing, outputs)
@@ -172,6 +168,16 @@ def run_dag_execution(
             else:
                 failed_steps.add(step_id)
                 workflow_failed = True
+
+                # ── Cross-workflow dispatch on failure ────────────────────
+                _handle_chain_dispatch(
+                    db=db,
+                    step_definition=steps_by_id.get(step_id, {}),
+                    outputs={},
+                    workflow_execution=workflow_execution,
+                    dispatch_type="failure",
+                )
+
                 logger.warning(
                     "dag_step_failed",
                     extra={"extra_data": {
@@ -180,9 +186,116 @@ def run_dag_execution(
                     }},
                 )
 
-        # Stop the DAG on failure OR when awaiting human approval. The finalizer
-        # inspects persisted step statuses (COMPLETED/SKIPPED/FAILED/WAITING).
         if workflow_failed or workflow_waiting:
             break
 
     return context
+
+
+# ── Cross-workflow chain dispatch ─────────────────────────────────────────────
+
+def _handle_chain_dispatch(
+    db,
+    step_definition: dict,
+    outputs: dict,
+    workflow_execution,
+    dispatch_type: str,  # "success" | "failure"
+) -> None:
+    """
+    Read on_success_dispatch / on_failure_dispatch / on_condition_dispatch
+    from a step's config and fire the target workflow if conditions are met.
+
+    Config format (set when user accepts a chain suggestion):
+      {
+        "on_success_dispatch":   {"workflow_id": 5},
+        "on_failure_dispatch":   {"workflow_id": 7},
+        "on_condition_dispatch": {
+            "field": "credit_score", "op": "lt", "value": 650,
+            "workflow_id": 8
+        }
+      }
+
+    Never raises — chain dispatch failure must not abort the current workflow.
+    """
+    config = step_definition.get("config") or {}
+    entity_id = str(getattr(workflow_execution, "entity_id", "") or "")
+
+    # ── Unconditional success/failure dispatch ────────────────────────────────
+    key = "on_success_dispatch" if dispatch_type == "success" else "on_failure_dispatch"
+    spec = config.get(key)
+    if spec and spec.get("workflow_id"):
+        _fire_workflow(db, spec["workflow_id"], entity_id, dispatch_type)
+
+    # ── Conditional dispatch (evaluated on success only) ─────────────────────
+    if dispatch_type == "success":
+        cond = config.get("on_condition_dispatch")
+        if cond and cond.get("workflow_id"):
+            if _evaluate_condition(cond, outputs):
+                _fire_workflow(
+                    db, cond["workflow_id"], entity_id, "condition_met"
+                )
+
+
+def _evaluate_condition(cond: dict, outputs: dict) -> bool:
+    """
+    Evaluate a simple field/op/value condition against step outputs.
+
+    Supported ops: eq, ne, lt, lte, gt, gte, in, not_in
+    """
+    field = cond.get("field")
+    op    = cond.get("op")
+    value = cond.get("value")
+
+    if not field or not op:
+        return False
+
+    actual = outputs.get(field)
+    if actual is None:
+        return False
+
+    try:
+        if op == "eq":      return actual == value
+        if op == "ne":      return actual != value
+        if op == "lt":      return float(actual) < float(value)
+        if op == "lte":     return float(actual) <= float(value)
+        if op == "gt":      return float(actual) > float(value)
+        if op == "gte":     return float(actual) >= float(value)
+        if op == "in":      return actual in (value or [])
+        if op == "not_in":  return actual not in (value or [])
+    except (TypeError, ValueError):
+        pass
+
+    return False
+
+
+def _fire_workflow(
+    db,
+    workflow_id: int,
+    entity_id: str,
+    event_type: str,
+) -> None:
+    """Dispatch a chained workflow. Best-effort — logs but never raises."""
+    try:
+        from app.services.workflow_dispatch_service import WorkflowDispatchService
+        result = WorkflowDispatchService(db).dispatch(
+            workflow_id=workflow_id,
+            entity_id=entity_id,
+            event_type=f"chain_{event_type}",
+        )
+        logger.info(
+            "chain_dispatch_fired",
+            extra={"extra_data": {
+                "target_workflow_id": workflow_id,
+                "event_type":         event_type,
+                "success":            result.success,
+                "message":            result.message,
+            }},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "chain_dispatch_failed",
+            extra={"extra_data": {
+                "target_workflow_id": workflow_id,
+                "error":              str(exc),
+            }},
+        )

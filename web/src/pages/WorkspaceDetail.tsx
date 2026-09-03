@@ -4,216 +4,102 @@ import {
   useGetWorkspaceQuery,
   useGetWorkspaceOverviewQuery,
   useGetWorkspaceDocumentsQuery,
-  useGetWorkspaceBusinessRulesQuery,
-  useGetWorkspaceActionsQuery,
   useGetWorkspaceWorkflowsQuery,
-  useGetWorkspaceSynthesisQuery,
-  useGetWorkspaceDiagnosticsQuery,
-  useSynthesizeWorkspaceWorkflowMutation,
+  useGetUnmappedActionsQuery,
+  useGetActionSuggestionsQuery,
+  useResolveUnmappedActionMutation,
+  useGetChainsQuery,
+  useDetectChainsMutation,
+  useUpdateChainMutation,
   useUploadBRDMutation,
+  useGetWorkspaceBusinessRulesQuery,
+  useGetWorkspaceDiagnosticsQuery,
 } from "@/store/api";
-import { Tabs } from "@/components/shared/Tabs";
 import {
-  FolderKanban,
-  AlertTriangle,
-  FileText,
-  Wand2,
-  Zap,
-  ScrollText,
-  Sparkles,
-  GitBranch,
-  Upload,
+  FolderKanban, FileText, Upload, GitBranch, Sparkles,
+  AlertTriangle, ChevronDown, ChevronRight, Check, X,
+  Link2, RefreshCw, Search, Plus, ScrollText,
 } from "lucide-react";
+import { clsx } from "clsx";
 
-type TabKey =
-  | "overview"
-  | "documents"
-  | "rules"
-  | "actions"
-  | "triggers"
-  | "workflows"
-  | "diagnostics";
-
-const TABS: { label: string; value: TabKey }[] = [
-  { label: "Overview",     value: "overview" },
-  { label: "Documents",    value: "documents" },
-  { label: "Business Rules", value: "rules" },
-  { label: "Actions",      value: "actions" },
-  { label: "Triggers",     value: "triggers" },
-  { label: "Workflows",    value: "workflows" },
-  { label: "Diagnostics",  value: "diagnostics" },
-];
-
+// ── Main page ─────────────────────────────────────────────────────────────────
 const WorkspaceDetail = () => {
   const { id } = useParams();
   const wsId = Number(id);
-  const [tab, setTab] = useState<TabKey>("overview");
-
   const { data: workspace } = useGetWorkspaceQuery(wsId);
   const { data: overview } = useGetWorkspaceOverviewQuery(wsId);
 
-  if (!workspace) return <div className="h-6 w-40 rounded skeleton mt-8" />;
+  if (!workspace) return <div className="h-8 w-48 rounded skeleton mt-8" />;
 
   return (
-    <div className="animate-in space-y-5">
-      <div className="flex items-center gap-2">
-        <FolderKanban size={18} className="text-brand-600" />
+    <div className="animate-in space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+          <FolderKanban size={16} className="text-gray-600" />
+        </div>
         <div>
           <h1 className="text-xl font-semibold text-gray-900">{workspace.display_name}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {workspace.name}
-            {workspace.organization_name ? ` · ${workspace.organization_name}` : ""}
+          <p className="text-sm text-gray-400">
+            {workspace.organization_name || workspace.name}
             {overview?.domain ? ` · ${overview.domain}` : ""}
           </p>
         </div>
-        {overview?.status && (
-          <span className="ml-auto text-2xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">
-            {overview.status}
-          </span>
-        )}
-      </div>
-
-      <Tabs value={tab} onChange={setTab} tabs={TABS} />
-
-      {tab === "overview" && <OverviewTab wsId={wsId} overview={overview} />}
-      {tab === "documents" && <DocumentsTab wsId={wsId} />}
-      {tab === "rules" && <RulesTab wsId={wsId} />}
-      {tab === "actions"      && <ActionsTab wsId={wsId} />}
-      {tab === "triggers"     && <TriggersTab wsId={wsId} />}
-      {tab === "workflows"    && <WorkflowsTab wsId={wsId} />}
-      {tab === "diagnostics"  && <DiagnosticsTab wsId={wsId} />}
-    </div>
-  );
-};
-
-// ── Overview ──────────────────────────────────────────────────────────────────
-
-const OverviewTab = ({ wsId, overview }: { wsId: number; overview: any }) => {
-  const { data: synthesis } = useGetWorkspaceSynthesisQuery(wsId);
-  const [synthesize, { data: synthResult, isLoading: synthesizing, error: synthError }] =
-    useSynthesizeWorkspaceWorkflowMutation();
-  const [wfName, setWfName] = useState("");
-  const [domain, setDomain] = useState("finance");
-  const synthErrorMsg = (synthError as any)?.data?.detail || "";
-
-  if (!overview) return <div className="h-24 rounded skeleton" />;
-
-  return (
-    <div className="space-y-5">
-      {overview.summary && (
-        <div className="card p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-1.5">Workspace summary</h3>
-          <p className="text-sm text-gray-600">{overview.summary}</p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="BRDs" value={overview.brd_count} />
-        <Stat label="Actions" value={overview.action_count} />
-        <Stat label="Triggers" value={overview.trigger_count} />
-        <Stat label="Business Rules" value={overview.business_rule_count} />
-        <Stat label="Workflows" value={overview.workflow_count} />
-        <Stat label="Generated Files" value={overview.generated_file_count} />
-        <Stat label="Unresolved" value={overview.unresolved_action_count} danger={overview.unresolved_action_count > 0} />
-        <Stat label="Review flags" value={overview.review_flag_count} danger={overview.review_flag_count > 0} />
-      </div>
-
-      {/* Two ways to build a workflow — deliberately distinct (see requirement 12). */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Link to={`/workspaces/${wsId}/build`} className="card p-5 hover:border-brand-300 transition-colors block">
-          <h3 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-            <Sparkles size={13} className="text-brand-600" /> Build with AI
-          </h3>
-          <p className="text-xs text-gray-500">
-            Describe the workflow in your words. The AI uses this workspace's actions and business rules — not the global catalog.
-          </p>
-          <span className="inline-flex items-center gap-1 text-xs text-brand-600 mt-3 font-medium">
-            Open builder →
-          </span>
+        <Link
+          to={`/workspaces/${wsId}/build`}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors"
+        >
+          <Sparkles size={12} /> Build workflow
         </Link>
-
-        <div className="card p-5 bg-gray-50/40">
-          <h3 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-            <Wand2 size={13} className="text-gray-600" /> Synthesize from BRDs
-          </h3>
-          <p className="text-xs text-gray-500">
-            Deterministic — chains all mapped workspace actions into one workflow. No AI. Use the form below.
-          </p>
-        </div>
       </div>
 
-      {/* Deterministic synthesis form. */}
-      <div className="card p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-          <Wand2 size={13} className="text-brand-600" /> Synthesize from BRDs
-        </h3>
-        <p className="text-xs text-gray-500 mb-3">
-          Deterministic — chains all mapped workspace actions into one workflow. No AI.
-        </p>
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex-1 min-w-[160px]">
-            <label className="text-2xs text-gray-500">Workflow name</label>
-            <input className="input" value={wfName} onChange={(e) => setWfName(e.target.value)} placeholder="Combined Loan Workflow" />
-          </div>
-          <div className="min-w-[120px]">
-            <label className="text-2xs text-gray-500">Domain</label>
-            <select className="input" value={domain} onChange={(e) => setDomain(e.target.value)}>
-              <option value="finance">finance</option>
-            </select>
-          </div>
-          <button
-            className="btn-brand disabled:opacity-50"
-            disabled={synthesizing || !wfName || (overview.action_count || 0) === 0}
-            onClick={() => synthesize({ workspaceId: wsId, name: wfName, domain })}
-          >
-            <Wand2 size={14} /> {synthesizing ? "Synthesizing..." : "Synthesize"}
-          </button>
-        </div>
-        {synthErrorMsg && <p className="text-xs text-danger mt-2">{synthErrorMsg}</p>}
-        {synthResult && (
-          <p className="text-xs text-success font-medium mt-2">
-            Created workflow #{synthResult.workflow_id} from {synthResult.brd_count} BRD(s) —{" "}
-            <Link to={`/workflows/${synthResult.workflow_id}`} className="underline">
-              view
-            </Link>
-          </p>
-        )}
-      </div>
-
-      {(synthesis?.review_flags || []).length > 0 && (
-        <div className="card p-5 border-amber-200 bg-amber-50/40">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-            <AlertTriangle size={13} className="text-amber-600" /> Needs review
-          </h3>
-          <div className="space-y-1.5">
-            {synthesis.review_flags.map((f: any, i: number) => (
-              <div key={i} className="text-sm text-gray-700">
-                {f.type === "low_confidence" && (
-                  <span>Low confidence ({(f.min_confidence * 100).toFixed(0)}%) — <b>{f.action}</b></span>
-                )}
-                {f.type === "unresolved_action" && (
-                  <span>Unresolved action — "<i>{f.term}</i>" from {f.source_document || "—"}</span>
-                )}
-                {f.type === "rule_conflict" && (
-                  <span>Conflicting thresholds on "<i>{f.subject}</i>" across {f.rules?.length || 0} rules</span>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* Stats row */}
+      {overview && (
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+          <StatPill label="BRDs"      value={overview.brd_count} />
+          <StatPill label="Actions"   value={overview.action_count} />
+          <StatPill label="Triggers"  value={overview.trigger_count} />
+          <StatPill label="Rules"     value={overview.business_rule_count} />
+          <StatPill label="Workflows" value={overview.workflow_count} />
+          <StatPill label="Unresolved" value={overview.unresolved_action_count} warn={overview.unresolved_action_count > 0} />
+          <StatPill label="Flags"     value={overview.review_flag_count} warn={overview.review_flag_count > 0} />
+          <StatPill label="Files"     value={overview.generated_file_count} />
         </div>
       )}
+
+      {/* Documents */}
+      <DocumentsSection wsId={wsId} />
+
+      {/* Unmapped actions — only shown when there are some */}
+      <UnmappedActionsSection wsId={wsId} />
+
+      {/* Workflows */}
+      <WorkflowsSection wsId={wsId} />
+
+      {/* Chains */}
+      <ChainsSection wsId={wsId} />
+
+      {/* Business rules — collapsible */}
+      <CollapsibleSection title="Business rules" icon={<ScrollText size={14} className="text-gray-500" />}>
+        <BusinessRulesContent wsId={wsId} />
+      </CollapsibleSection>
+
+      {/* Diagnostics — collapsible */}
+      <CollapsibleSection title="Mapping diagnostics" icon={<Search size={14} className="text-gray-500" />}>
+        <DiagnosticsContent wsId={wsId} />
+      </CollapsibleSection>
     </div>
   );
 };
 
 // ── Documents ─────────────────────────────────────────────────────────────────
-
-const DocumentsTab = ({ wsId }: { wsId: number }) => {
+const DocumentsSection = ({ wsId }: { wsId: number }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const { data, isLoading, refetch } = useGetWorkspaceDocumentsQuery(wsId);
   const [upload, { data: uploadResult, isLoading: uploading, error: uploadError }] = useUploadBRDMutation();
   const uploadErr = (uploadError as any)?.data?.detail || (uploadError ? "Upload failed" : "");
+  const docs = data?.documents || [];
 
   function handleUpload() {
     if (!files.length) return;
@@ -223,434 +109,449 @@ const DocumentsTab = ({ wsId }: { wsId: number }) => {
     upload(fd).then(() => { setFiles([]); refetch(); });
   }
 
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  const docs = data?.documents || [];
+  return (
+    <Section title="BRD Documents" icon={<FileText size={14} className="text-gray-500" />}>
+      {/* Upload area */}
+      <div
+        onClick={() => fileRef.current?.click()}
+        className="border-2 border-dashed border-gray-200 rounded-lg px-4 py-5 text-center cursor-pointer hover:border-gray-300 hover:bg-gray-50 transition-all"
+      >
+        <Upload size={18} className="mx-auto text-gray-300 mb-1.5" />
+        <p className="text-sm text-gray-500">
+          {files.length > 0 ? `${files.length} file(s) ready` : "Click to select PDFs"}
+        </p>
+        <p className="text-xs text-gray-400 mt-0.5">Multiple PDFs supported</p>
+        <input ref={fileRef} type="file" accept=".pdf" multiple className="hidden"
+          onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+      </div>
+
+      {files.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {files.map((f, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
+              <FileText size={11} className="text-gray-400" />
+              <span className="truncate">{f.name}</span>
+            </div>
+          ))}
+          <button onClick={handleUpload} disabled={uploading}
+            className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-50">
+            {uploading ? "Processing…" : "Extract Knowledge"}
+          </button>
+        </div>
+      )}
+      {uploadErr && <p className="text-xs text-red-500 mt-1.5">{uploadErr}</p>}
+      {uploadResult && (
+        <p className="text-xs text-emerald-600 font-medium mt-1.5">
+          {uploadResult.succeeded}/{uploadResult.total} ingested successfully
+        </p>
+      )}
+
+      {/* Doc list */}
+      {!isLoading && docs.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {docs.map((d: any) => (
+            <div key={d.workflow_knowledge_id}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-100 bg-white">
+              <FileText size={13} className="text-gray-400 shrink-0" />
+              <span className="text-sm font-medium text-gray-800 flex-1 truncate">{d.name}</span>
+              <MappingBadge status={d.mapping_status} />
+              <span className="text-xs text-gray-400 tabular-nums">
+                {d.mapped_action_count}/{d.action_count} actions
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {!isLoading && docs.length === 0 && (
+        <p className="text-sm text-gray-400 mt-3">No BRDs uploaded yet.</p>
+      )}
+    </Section>
+  );
+};
+
+// ── Unmapped actions ──────────────────────────────────────────────────────────
+const UnmappedActionsSection = ({ wsId }: { wsId: number }) => {
+  const { data, isLoading, refetch } = useGetUnmappedActionsQuery(wsId);
+  const items: any[] = data?.unmapped_actions || [];
+  if (isLoading || items.length === 0) return null;
 
   return (
-    <div className="space-y-3">
-      {/* ── Upload BRDs ── */}
-      <div className="card p-4">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-          <Upload size={13} className="text-brand-600" /> Upload BRDs
-        </h3>
-        <div
-          onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50/20 transition-all group"
-        >
-          <Upload size={20} className="mx-auto text-gray-300 group-hover:text-brand-400 transition-colors mb-1" />
-          <p className="text-sm text-gray-600">
-            {files.length > 0 ? `${files.length} file(s) selected` : "Click to select PDFs"}
-          </p>
-          <p className="text-2xs text-gray-400 mt-0.5">Multiple PDFs allowed</p>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => setFiles(Array.from(e.target.files || []))}
-          />
-        </div>
-        {files.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
-                <FileText size={12} className="text-gray-400" />
-                <span className="truncate">{f.name}</span>
-              </div>
-            ))}
-            <button onClick={handleUpload} disabled={uploading} className="btn-brand mt-2 text-xs">
-              <FileText size={13} /> {uploading ? "Processing..." : "Extract Knowledge"}
+    <Section
+      title={`Unresolved actions (${items.length})`}
+      icon={<AlertTriangle size={14} className="text-amber-500" />}
+      headerExtra={
+        <span className="text-xs text-amber-600 font-medium">
+          These actions from your BRDs couldn't be matched automatically
+        </span>
+      }
+    >
+      <div className="space-y-2">
+        {items.map((item: any) => (
+          <UnmappedActionRow key={item.mapping_id} item={item} wsId={wsId} onResolved={refetch} />
+        ))}
+      </div>
+    </Section>
+  );
+};
+
+const UnmappedActionRow = ({ item, wsId, onResolved }: { item: any; wsId: number; onResolved: () => void }) => {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"catalog" | "custom">("catalog");
+  const [selectedAdId, setSelectedAdId] = useState<number | null>(null);
+  const [actionName, setActionName] = useState(
+    item.extract_name.toLowerCase().replace(/\s+/g, "_")
+  );
+  const [displayName, setDisplayName] = useState(item.extract_name);
+  const [executionType, setExecutionType] = useState("python");
+  const [handler, setHandler] = useState(actionName);
+
+  const { data: suggestions, isFetching: loadingSuggestions } =
+    useGetActionSuggestionsQuery({ workspaceId: wsId, mappingId: item.mapping_id }, { skip: !open });
+  const [resolve, { isLoading: resolving }] = useResolveUnmappedActionMutation();
+
+  async function handleResolve() {
+    if (mode === "catalog" && selectedAdId) {
+      await resolve({ workspaceId: wsId, mappingId: item.mapping_id, action_definition_id: selectedAdId });
+    } else if (mode === "custom") {
+      await resolve({
+        workspaceId: wsId,
+        mappingId: item.mapping_id,
+        action_name: actionName,
+        display_name: displayName,
+        execution_template: { execution_type: executionType, configuration: { handler } },
+      });
+    }
+    onResolved();
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-100 bg-amber-50/30 overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-amber-50/60 transition-colors"
+      >
+        {open ? <ChevronDown size={13} className="text-gray-400 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
+        <span className="text-sm font-medium text-gray-800 flex-1 truncate">"{item.extract_name}"</span>
+        <span className="text-xs text-gray-400 truncate max-w-[180px]">{item.source_document}</span>
+        <span className="text-xs text-amber-600">unresolved</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 pt-1 border-t border-amber-100 space-y-3">
+          {item.description && (
+            <p className="text-xs text-gray-500 italic">"{item.description}"</p>
+          )}
+
+          {/* Mode toggle */}
+          <div className="flex gap-2">
+            <button onClick={() => setMode("catalog")}
+              className={clsx("px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                mode === "catalog" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}>
+              Map to catalog
+            </button>
+            <button onClick={() => setMode("custom")}
+              className={clsx("px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                mode === "custom" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}>
+              Define custom
             </button>
           </div>
-        )}
-        {uploadErr && <p className="text-xs text-danger mt-2">{uploadErr}</p>}
-        {uploadResult && (
-          <p className="text-xs text-success font-medium mt-2">
-            {uploadResult.succeeded}/{uploadResult.total} BRD(s) ingested successfully.
-          </p>
-        )}
-      </div>
 
-      {/* ── Uploaded documents ── */}
-      {docs.length === 0 ? (
-        <Empty text="No BRDs uploaded yet. Use the upload area above." />
-      ) : (
-        docs.map((d: any) => (
-          <div key={d.workflow_knowledge_id} className="card p-4">
-            <div className="flex items-center gap-2">
-              <FileText size={14} className="text-brand-600 shrink-0" />
-              <span className="font-medium text-gray-900 text-sm truncate">{d.name}</span>
-              <MappingBadge status={d.mapping_status} />
-              {d.uploaded_at && (
-                <span className="text-2xs text-gray-400 ml-auto">
-                  {new Date(d.uploaded_at).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-2xs text-gray-500">
-              <span>Extraction: <b className="text-gray-700">{d.extraction_status}</b></span>
-              <span>Actions: <b className="text-gray-700">{d.mapped_action_count}/{d.action_count}</b> mapped</span>
-              <span>Triggers: <b className="text-gray-700">{d.trigger_count}</b></span>
-              <span>Business rules: <b className="text-gray-700">{d.business_rule_count}</b></span>
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-};
-
-// ── Business Rules ──────────────────────────────────────────────────────────────
-
-const RulesTab = ({ wsId }: { wsId: number }) => {
-  const { data, isLoading } = useGetWorkspaceBusinessRulesQuery(wsId);
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  const rules = data?.business_rules || [];
-  const conflicts = data?.conflicts || [];
-
-  if (rules.length === 0)
-    return <Empty text="No business rules extracted yet." />;
-
-  return (
-    <div className="space-y-4">
-    {conflicts.length > 0 && (
-      <div className="card p-5 border-amber-300 bg-amber-50/60">
-        <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
-          <AlertTriangle size={13} className="text-amber-600" /> Potential conflicts
-        </h3>
-        <div className="space-y-2">
-          {conflicts.map((c: any, i: number) => (
-            <div key={i} className="text-xs text-gray-700">
-              <p className="font-medium text-gray-800">On "{c.subject}":</p>
-              <ul className="mt-0.5 space-y-0.5">
-                {c.rules.map((r: any, j: number) => (
-                  <li key={j}>
-                    <span className="text-gray-400">{r.source_document || "—"}:</span>{" "}
-                    <span className="italic">"{r.rule}"</span>
-                  </li>
+          {mode === "catalog" && (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-500">Select from catalog suggestions:</p>
+              {loadingSuggestions && <p className="text-xs text-gray-400">Loading suggestions…</p>}
+              <div className="space-y-1">
+                {(suggestions?.suggestions || []).map((s: any) => (
+                  <button key={s.action_definition_id}
+                    onClick={() => setSelectedAdId(s.action_definition_id)}
+                    className={clsx("w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs border transition-colors",
+                      selectedAdId === s.action_definition_id
+                        ? "border-gray-900 bg-gray-50"
+                        : "border-gray-100 hover:border-gray-200 hover:bg-gray-50/50"
+                    )}>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-gray-800">{s.display_name}</span>
+                      <code className="ml-2 text-gray-400">{s.name}</code>
+                    </div>
+                    <span className="text-gray-400 tabular-nums">{(s.rank * 100).toFixed(0)}%</span>
+                    {selectedAdId === s.action_definition_id && <Check size={12} className="text-gray-900 shrink-0" />}
+                  </button>
                 ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-    <div className="card p-5">
-      <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-        <ScrollText size={13} className="text-brand-600" /> Business rules MFlows extracted
-      </h3>
-      <ol className="space-y-2 list-none">
-        {rules.map((r: any, i: number) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            <span className="w-5 h-5 rounded bg-gray-100 text-gray-600 flex items-center justify-center text-2xs font-bold shrink-0">
-              {i + 1}
-            </span>
-            <div className="min-w-0">
-              <p className="text-gray-800">{r.rule}</p>
-              {r.source_document && (
-                <p className="text-2xs text-gray-400 mt-0.5">from {r.source_document}</p>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
-    </div>
-  );
-};
-
-// ── Actions ─────────────────────────────────────────────────────────────────────
-
-const ActionsTab = ({ wsId }: { wsId: number }) => {
-  const { data, isLoading } = useGetWorkspaceActionsQuery(wsId);
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  const actions = data?.actions || [];
-  const unresolved = data?.unresolved_actions || [];
-
-  return (
-    <div className="space-y-4">
-      <div className="card p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-          Workspace actions (deduplicated across BRDs)
-        </h3>
-        <p className="text-2xs text-gray-400 mb-3">
-          These are the actions relevant to this workspace — the candidate set for generation. The full global catalog is available separately.
-        </p>
-        <div className="space-y-2">
-          {actions.map((a: any) => (
-            <div key={a.canonical_id} className="border-b border-gray-100 last:border-0 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-800 text-sm">{a.display_name}</span>
-                <span className="text-2xs px-1.5 py-0.5 rounded bg-brand-50 text-brand-700">
-                  {a.contributed_by} BRD{a.contributed_by > 1 ? "s" : ""}
-                </span>
-                {a.min_confidence != null && (
-                  <span className="text-2xs text-gray-400 ml-auto">
-                    min conf {(a.min_confidence * 100).toFixed(0)}%
-                  </span>
+                {!loadingSuggestions && (suggestions?.suggestions || []).length === 0 && (
+                  <p className="text-xs text-gray-400">No close matches found. Try defining custom.</p>
                 )}
               </div>
-              <div className="mt-1 space-y-0.5">
-                {(a.sources || []).map((s: any, i: number) => (
-                  <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                    <FileText size={11} className="text-gray-300" />
-                    <span className="text-gray-400">{s.source_document || "—"}:</span>{" "}
-                    <span className="italic">"{s.clause}"</span>
-                  </p>
-                ))}
+            </div>
+          )}
+
+          {mode === "custom" && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500">Action name (handler key)</label>
+                  <input className="input text-xs mt-0.5" value={actionName}
+                    onChange={(e) => { setActionName(e.target.value); setHandler(e.target.value); }} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Display name</label>
+                  <input className="input text-xs mt-0.5" value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500">Execution type</label>
+                  <select className="input text-xs mt-0.5" value={executionType} onChange={(e) => setExecutionType(e.target.value)}>
+                    <option value="python">python</option>
+                    <option value="http">http</option>
+                    <option value="human_task">human_task</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Handler name</label>
+                  <input className="input text-xs mt-0.5" value={handler} onChange={(e) => setHandler(e.target.value)} />
+                </div>
               </div>
             </div>
-          ))}
-          {actions.length === 0 && (
-            <p className="text-sm text-gray-400">No mapped actions yet. Upload BRDs to this workspace.</p>
           )}
-        </div>
-      </div>
 
-      {unresolved.length > 0 && (
-        <div className="card p-5 border-amber-200 bg-amber-50/40">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-            <AlertTriangle size={13} className="text-amber-600" /> Unresolved (no catalog match)
-          </h3>
-          <div className="space-y-1">
-            {unresolved.map((u: any, i: number) => (
-              <p key={i} className="text-sm text-gray-700">
-                "<i>{u.term}</i>" <span className="text-2xs text-gray-400">from {u.source_document || "—"}</span>
-              </p>
-            ))}
-          </div>
+          <button
+            onClick={handleResolve}
+            disabled={resolving || (mode === "catalog" && !selectedAdId)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-40"
+          >
+            <Check size={12} /> {resolving ? "Saving…" : "Resolve action"}
+          </button>
         </div>
       )}
-    </div>
-  );
-};
-
-// ── Triggers ──────────────────────────────────────────────────────────────────
-
-const TriggersTab = ({ wsId }: { wsId: number }) => {
-  const { data, isLoading } = useGetWorkspaceActionsQuery(wsId);
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  const triggers = data?.triggers || [];
-
-  if (triggers.length === 0)
-    return <Empty text="No triggers mapped in this workspace yet." />;
-
-  return (
-    <div className="card p-5">
-      <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
-        <Zap size={13} className="text-brand-600" /> Workspace triggers
-      </h3>
-      <div className="space-y-2">
-        {triggers.map((t: any) => (
-          <div key={t.canonical_id} className="border-b border-gray-100 last:border-0 pb-2">
-            <span className="font-medium text-gray-800 text-sm">{t.trigger}</span>
-            <div className="mt-1 space-y-0.5">
-              {(t.sources || []).map((s: any, i: number) => (
-                <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                  <FileText size={11} className="text-gray-300" />
-                  <span className="text-gray-400">{s.source_document || "—"}:</span>{" "}
-                  <span className="italic">"{s.clause}"</span>
-                </p>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 };
 
 // ── Workflows ─────────────────────────────────────────────────────────────────
-
-const WorkflowsTab = ({ wsId }: { wsId: number }) => {
-  const { data, isLoading } = useGetWorkspaceWorkflowsQuery(wsId);
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  const workflows = data || [];
-
-  if (workflows.length === 0)
-    return <Empty text="No workflows generated in this workspace yet. Use Build with AI or Synthesize from BRDs." />;
+const WorkflowsSection = ({ wsId }: { wsId: number }) => {
+  const { data: workflows, isLoading } = useGetWorkspaceWorkflowsQuery(wsId);
+  const list: any[] = workflows || [];
 
   return (
-    <div className="space-y-2">
-      {workflows.map((w: any) => (
-        <Link
-          key={w.id}
-          to={`/workflows/${w.id}`}
-          className="card p-4 flex items-center gap-3 hover:border-brand-300 transition-colors"
-        >
-          <GitBranch size={15} className="text-brand-600 shrink-0" />
-          <div className="min-w-0">
-            <p className="font-medium text-gray-900 text-sm truncate">{w.name}</p>
-            <p className="text-2xs text-gray-400">
-              #{w.id} · {w.domain}
-              {w.parsed_rule_json?.steps ? ` · ${w.parsed_rule_json.steps.length} step(s)` : ""}
-            </p>
-          </div>
-          {w.status && (
-            <span className="ml-auto text-2xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">
+    <Section
+      title="Workflows"
+      icon={<GitBranch size={14} className="text-gray-500" />}
+      headerExtra={
+        <div className="flex items-center gap-2 ml-auto">
+          <Link to={`/workspaces/${wsId}/build`}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors">
+            <Sparkles size={11} /> AI build
+          </Link>
+        </div>
+      }
+    >
+      {isLoading && <div className="h-12 rounded skeleton" />}
+      {!isLoading && list.length === 0 && (
+        <p className="text-sm text-gray-400">No workflows yet. Use AI build or synthesize from BRDs.</p>
+      )}
+      <div className="space-y-1.5 mt-1">
+        {list.map((w: any) => (
+          <Link key={w.id} to={`/workflows/${w.id}`}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-100 bg-white hover:border-gray-200 transition-colors">
+            <GitBranch size={13} className="text-gray-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-800 truncate">{w.name}</p>
+              <p className="text-xs text-gray-400">
+                #{w.id} · {w.domain}
+                {w.parsed_rule_json?.steps ? ` · ${w.parsed_rule_json.steps.length} steps` : ""}
+              </p>
+            </div>
+            <span className={clsx("text-xs px-2 py-0.5 rounded-full capitalize",
+              w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500")}>
               {w.status}
             </span>
-          )}
-        </Link>
-      ))}
+          </Link>
+        ))}
+      </div>
+    </Section>
+  );
+};
+
+// ── Chains ────────────────────────────────────────────────────────────────────
+const ChainsSection = ({ wsId }: { wsId: number }) => {
+  const { data: chains = [], isLoading, refetch } = useGetChainsQuery({ workspaceId: wsId });
+  const [detect, { isLoading: detecting }] = useDetectChainsMutation();
+  const [update] = useUpdateChainMutation();
+
+  if (!isLoading && chains.length === 0 && !detecting) {
+    return (
+      <Section title="Workflow chains" icon={<Link2 size={14} className="text-gray-500" />}
+        headerExtra={
+          <button onClick={() => detect(wsId).then(() => refetch())}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 transition-colors">
+            <RefreshCw size={11} /> Detect
+          </button>
+        }>
+        <p className="text-sm text-gray-400">No chains detected yet. Click Detect to run analysis.</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title={`Workflow chains (${chains.length})`} icon={<Link2 size={14} className="text-gray-500" />}
+      headerExtra={
+        <button onClick={() => detect(wsId).then(() => refetch())} disabled={detecting}
+          className="ml-auto text-xs text-gray-500 hover:text-gray-800 inline-flex items-center gap-1 disabled:opacity-40 transition-colors">
+          <RefreshCw size={11} className={detecting ? "animate-spin" : ""} /> {detecting ? "Detecting…" : "Re-detect"}
+        </button>
+      }>
+      {isLoading && <div className="h-16 rounded skeleton" />}
+      <div className="space-y-2 mt-1">
+        {chains.map((c: any) => (
+          <ChainRow key={c.id} chain={c} wsId={wsId}
+            onAccept={() => update({ workspaceId: wsId, chainId: c.id, status: "accepted" }).then(() => refetch())}
+            onReject={() => update({ workspaceId: wsId, chainId: c.id, status: "rejected" }).then(() => refetch())}
+          />
+        ))}
+      </div>
+    </Section>
+  );
+};
+
+const ChainRow = ({ chain, wsId, onAccept, onReject }: { chain: any; wsId: number; onAccept: () => void; onReject: () => void }) => {
+  const statusColors: Record<string, string> = {
+    auto:      "bg-emerald-50 text-emerald-700",
+    accepted:  "bg-blue-50 text-blue-700",
+    rejected:  "bg-gray-100 text-gray-400 line-through",
+    suggested: "bg-amber-50 text-amber-700",
+  };
+
+  return (
+    <div className={clsx("flex items-center gap-3 px-3 py-2.5 rounded-lg border text-sm",
+      chain.status === "rejected" ? "border-gray-100 opacity-50" : "border-gray-100 bg-white")}>
+      <Link2 size={13} className="text-gray-400 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <span className="font-medium text-gray-700">{chain.source_action}</span>
+        <span className="text-gray-400 mx-1.5">→</span>
+        <span className="font-medium text-gray-700">{chain.target_trigger}</span>
+        <span className="ml-2 text-xs text-gray-400">
+          ({(chain.confidence * 100).toFixed(0)}% · {chain.match_type})
+        </span>
+      </div>
+      <span className={clsx("text-xs px-2 py-0.5 rounded-full", statusColors[chain.status] || "bg-gray-100 text-gray-500")}>
+        {chain.status}
+      </span>
+      {chain.status === "suggested" && (
+        <div className="flex gap-1 shrink-0">
+          <button onClick={onAccept} title="Accept"
+            className="p-1 rounded hover:bg-emerald-50 text-emerald-600 transition-colors">
+            <Check size={13} />
+          </button>
+          <button onClick={onReject} title="Reject"
+            className="p-1 rounded hover:bg-red-50 text-red-400 transition-colors">
+            <X size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
 
-// ── shared bits ─────────────────────────────────────────────────────────────────
+// ── Business Rules (collapsible content) ─────────────────────────────────────
+const BusinessRulesContent = ({ wsId }: { wsId: number }) => {
+  const { data, isLoading } = useGetWorkspaceBusinessRulesQuery(wsId);
+  if (isLoading) return <div className="h-12 rounded skeleton" />;
+  const rules = data?.business_rules || [];
+  if (!rules.length) return <p className="text-sm text-gray-400">No rules extracted yet.</p>;
 
-const Stat = ({ label, value, danger }: { label: string; value: any; danger?: boolean }) => (
-  <div className="card p-4">
-    <p className="text-2xs font-medium text-gray-500 mb-1">{label}</p>
-    <p className={"text-sm font-semibold " + (danger ? "text-danger" : "text-gray-900")}>{value ?? 0}</p>
-  </div>
-);
-
-const Empty = ({ text }: { text: string }) => (
-  <div className="card p-8 text-center text-sm text-gray-400">{text}</div>
-);
-
-const MappingBadge = ({ status }: { status: string }) => {
-  const map: Record<string, string> = {
-    mapped: "bg-emerald-50 text-emerald-700",
-    partial: "bg-amber-50 text-amber-700",
-    unmapped: "bg-red-50 text-red-700",
-    none: "bg-gray-100 text-gray-500",
-  };
   return (
-    <span className={"text-2xs px-1.5 py-0.5 rounded capitalize " + (map[status] || map.none)}>
-      {status}
-    </span>
+    <ol className="space-y-2">
+      {rules.map((r: any, i: number) => (
+        <li key={i} className="flex items-start gap-2 text-sm">
+          <span className="w-5 h-5 rounded bg-gray-100 text-gray-500 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+            {i + 1}
+          </span>
+          <div>
+            <p className="text-gray-700">{r.rule}</p>
+            {r.source_document && <p className="text-xs text-gray-400 mt-0.5">{r.source_document}</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 };
 
-// ── Diagnostics ────────────────────────────────────────────────────────────────
-
-const DIAG_COLORS: Record<string, string> = {
-  MAPPED:            "text-success",
-  RETRIEVAL_MISS:    "text-danger",
-  MAPPING_REJECTED:  "text-amber-600",
-  PENDING:           "text-gray-400",
-};
-
-const DIAG_LABELS: Record<string, string> = {
-  MAPPED:            "Mapped",
-  RETRIEVAL_MISS:    "Retrieval miss — no candidates returned",
-  MAPPING_REJECTED:  "Candidates retrieved but all below threshold",
-  PENDING:           "Not yet processed",
-};
-
-const DiagnosticsTab = ({ wsId }: { wsId: number }) => {
+// ── Diagnostics (collapsible content) ────────────────────────────────────────
+const DiagnosticsContent = ({ wsId }: { wsId: number }) => {
   const { data, isLoading } = useGetWorkspaceDiagnosticsQuery(wsId);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-
-  if (isLoading) return <div className="h-24 rounded skeleton" />;
-  if (!data) return <Empty text="No diagnostic data available." />;
+  if (isLoading) return <div className="h-16 rounded skeleton" />;
+  if (!data) return <p className="text-sm text-gray-400">No diagnostic data.</p>;
 
   const { totals, brds } = data;
 
   return (
     <div className="space-y-4">
-      {/* ── Summary ── */}
-      <div className="card p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Pipeline summary</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
-          <SumStat label="Extracted" value={totals.extracted_actions} />
-          <SumStat label="Mapped" value={totals.mapped} color="text-success" />
-          <SumStat label="Unmapped" value={totals.unmapped} color="text-danger" />
-          <SumStat label="Retrieval miss" value={totals.retrieval_miss} color="text-danger" />
-          <SumStat label="Rejected" value={totals.mapping_rejected} color="text-amber-600" />
-          <SumStat label="Pending" value={totals.pending} />
-        </div>
+      {/* Summary */}
+      <div className="grid grid-cols-6 gap-2 text-center">
+        {[
+          ["Extracted", totals.extracted_actions, ""],
+          ["Mapped",    totals.mapped,             "text-emerald-600"],
+          ["Unmapped",  totals.unmapped,            "text-red-500"],
+          ["Miss",      totals.retrieval_miss,      "text-red-500"],
+          ["Rejected",  totals.mapping_rejected,    "text-amber-600"],
+          ["Pending",   totals.pending,             ""],
+        ].map(([label, val, color]) => (
+          <div key={label as string} className="rounded-lg border border-gray-100 py-2">
+            <p className={clsx("text-sm font-bold", color || "text-gray-800")}>{val}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{label}</p>
+          </div>
+        ))}
       </div>
 
-      {/* ── Per-BRD action trace ── */}
+      {/* Per-BRD */}
       {(brds || []).map((brd: any) => (
-        <div key={brd.workflow_knowledge_id} className="card p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <FileText size={13} className="text-brand-600 shrink-0" />
-            <span className="font-medium text-gray-900 text-sm truncate">
-              {brd.source_document || brd.workflow_name}
-            </span>
-            <span className="text-2xs text-gray-400 ml-auto">{brd.actions.length} actions</span>
-          </div>
-
-          <div className="space-y-1.5">
+        <div key={brd.workflow_knowledge_id}>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">
+            {brd.source_document || brd.workflow_name}
+          </p>
+          <div className="space-y-1">
             {brd.actions.map((a: any) => {
               const isOpen = !!expanded[a.mapping_id];
-              const isMapped = a.diagnostic === "MAPPED";
+              const mapped = a.diagnostic === "MAPPED";
               return (
-                <div key={a.mapping_id} className="border border-gray-100 rounded-lg overflow-hidden">
-                  {/* Row header */}
+                <div key={a.mapping_id} className="rounded-lg border border-gray-100 overflow-hidden">
                   <button
                     onClick={() => setExpanded((e) => ({ ...e, [a.mapping_id]: !e[a.mapping_id] }))}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
                   >
-                    <span className={`text-sm font-medium ${isMapped ? "text-success" : "text-amber-600"}`}>
-                      {isMapped ? "✓" : "⚠"}
+                    <span className={mapped ? "text-emerald-500 text-xs" : "text-amber-500 text-xs"}>
+                      {mapped ? "✓" : "⚠"}
                     </span>
-                    <span className="text-sm text-gray-800 truncate flex-1">{a.extract_name}</span>
-                    {isMapped && a.matched_action && (
-                      <code className="text-2xs text-gray-500 hidden sm:block">
-                        → {a.matched_action.name}
-                      </code>
+                    <span className="text-sm text-gray-700 flex-1 truncate">{a.extract_name}</span>
+                    {mapped && a.matched_action && (
+                      <code className="text-xs text-gray-400 hidden sm:block">→ {a.matched_action.name}</code>
                     )}
                     {a.confidence != null && (
-                      <span className="text-2xs text-gray-400 ml-2">
-                        {(a.confidence * 100).toFixed(0)}%
-                      </span>
+                      <span className="text-xs text-gray-400">{(a.confidence * 100).toFixed(0)}%</span>
                     )}
-                    <span className="text-2xs text-gray-300">{isOpen ? "▲" : "▼"}</span>
+                    <span className="text-gray-300 text-xs">{isOpen ? "▲" : "▼"}</span>
                   </button>
-
-                  {/* Expanded detail */}
                   {isOpen && (
-                    <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2 bg-gray-50/40">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
+                    <div className="px-3 pb-3 pt-1 border-t border-gray-100 bg-gray-50/40 space-y-2">
+                      {a.query_text && (
                         <div>
-                          <p className="text-gray-400 uppercase tracking-wide mb-0.5">BRD text</p>
-                          <p className="text-gray-700 italic">"{a.extract_name}"</p>
+                          <p className="text-xs text-gray-400 mb-0.5">Query</p>
+                          <code className="text-xs text-gray-600 bg-white border border-gray-100 rounded px-1.5 py-0.5 block">{a.query_text}</code>
                         </div>
-                        {a.description && (
-                          <div>
-                            <p className="text-gray-400 uppercase tracking-wide mb-0.5">Description</p>
-                            <p className="text-gray-600">{a.description}</p>
-                          </div>
-                        )}
-                        {a.query_text && (
-                          <div className="sm:col-span-2">
-                            <p className="text-gray-400 uppercase tracking-wide mb-0.5">Query sent to retrieval</p>
-                            <code className="text-gray-700 bg-gray-100 rounded px-1">{a.query_text}</code>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Diagnostic classification */}
-                      <div className={`text-xs font-medium ${DIAG_COLORS[a.diagnostic] || "text-gray-500"}`}>
-                        {DIAG_LABELS[a.diagnostic] || a.diagnostic}
-                      </div>
-
-                      {/* Top-K candidates */}
+                      )}
                       {(a.top_candidates || []).length > 0 && (
                         <div>
-                          <p className="text-2xs text-gray-400 uppercase tracking-wide mb-1">Top candidates</p>
-                          <div className="space-y-0.5">
-                            {a.top_candidates.slice(0, 8).map((c: any, i: number) => (
-                              <div key={i} className="flex items-center gap-2 text-2xs">
-                                <span className="w-4 text-gray-400">{i + 1}.</span>
-                                <span className={`font-medium flex-1 truncate ${i === 0 && isMapped ? "text-success" : "text-gray-700"}`}>
-                                  {c.display_name || c.name}
-                                </span>
-                                {c.confidence != null && (
-                                  <span className="text-gray-500">conf {(c.confidence * 100).toFixed(0)}%</span>
-                                )}
-                                <span className="text-gray-400">rrf {c.rrf_score?.toFixed(4)}</span>
-                                {c.vector_rank && <span className="text-gray-300">v:{c.vector_rank}</span>}
-                                {c.bm25_rank && <span className="text-gray-300">b:{c.bm25_rank}</span>}
-                              </div>
-                            ))}
-                          </div>
+                          <p className="text-xs text-gray-400 mb-1">Top candidates</p>
+                          {a.top_candidates.slice(0, 6).map((c: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2 text-xs py-0.5">
+                              <span className="text-gray-400 w-4 text-right">{i + 1}.</span>
+                              <span className="font-medium text-gray-700 flex-1 truncate">{c.display_name || c.name}</span>
+                              {c.confidence != null && <span className="text-gray-400">{(c.confidence * 100).toFixed(0)}%</span>}
+                              <span className="text-gray-300">rrf {c.rrf_score?.toFixed(3)}</span>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -665,11 +566,62 @@ const DiagnosticsTab = ({ wsId }: { wsId: number }) => {
   );
 };
 
-const SumStat = ({ label, value, color }: { label: string; value: any; color?: string }) => (
-  <div className="card p-3">
-    <p className={`text-sm font-bold ${color || "text-gray-900"}`}>{value ?? 0}</p>
-    <p className="text-2xs text-gray-500 mt-0.5">{label}</p>
+// ── Shared primitives ─────────────────────────────────────────────────────────
+const Section = ({
+  title, icon, children, headerExtra,
+}: {
+  title: string; icon?: React.ReactNode; children: React.ReactNode; headerExtra?: React.ReactNode;
+}) => (
+  <div className="space-y-3">
+    <div className="flex items-center gap-2">
+      {icon}
+      <h2 className="text-sm font-semibold text-gray-700">{title}</h2>
+      {headerExtra}
+    </div>
+    {children}
   </div>
 );
+
+const CollapsibleSection = ({
+  title, icon, children,
+}: {
+  title: string; icon?: React.ReactNode; children: React.ReactNode;
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 py-1.5 text-left group"
+      >
+        {icon}
+        <h2 className="text-sm font-semibold text-gray-500 group-hover:text-gray-700 transition-colors">{title}</h2>
+        <span className="text-gray-300 text-xs ml-1">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div className="mt-3">{children}</div>}
+    </div>
+  );
+};
+
+const StatPill = ({ label, value, warn }: { label: string; value: any; warn?: boolean }) => (
+  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-center">
+    <p className={clsx("text-sm font-bold", warn ? "text-amber-600" : "text-gray-800")}>{value ?? 0}</p>
+    <p className="text-[10px] text-gray-400 mt-0.5 leading-none">{label}</p>
+  </div>
+);
+
+const MappingBadge = ({ status }: { status: string }) => {
+  const colors: Record<string, string> = {
+    mapped:   "bg-emerald-50 text-emerald-700",
+    partial:  "bg-amber-50 text-amber-700",
+    unmapped: "bg-red-50 text-red-600",
+    none:     "bg-gray-100 text-gray-400",
+  };
+  return (
+    <span className={clsx("text-xs px-1.5 py-0.5 rounded capitalize", colors[status] || colors.none)}>
+      {status}
+    </span>
+  );
+};
 
 export default WorkspaceDetail;

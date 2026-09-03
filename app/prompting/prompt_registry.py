@@ -41,7 +41,6 @@ class PromptKey(str, Enum):
 
     # Flat (markdown) prompts
     WORKFLOW_EXTRACTION = "extractor.md"
-    WORKFLOW_REPAIR = "repair.md"
 
     # Versioned prompts (name matches directory under versions/)
     WORKFLOW_GENERATION = "workflow_generation"

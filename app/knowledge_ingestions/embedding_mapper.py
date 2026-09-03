@@ -89,30 +89,37 @@ class EmbeddingMapper:
             )
             top_candidates_json = _serialize_candidates(all_candidates)
 
-            # Decision engine picks best or None
             from app.retrieval.thresholds import RetrievalType
             best: RankedCandidate | None = self.pipeline._decision.decide(
                 all_candidates, entity_type=RetrievalType.ACTION
             )
 
             if best is not None:
-                # Use sigmoid(cross_encoder_score) as confidence if available,
-                # else fall back to rrf_score
                 if best.cross_encoder_score is not None:
                     real_confidence = _sigmoid(float(best.cross_encoder_score))
                 else:
                     real_confidence = float(best.rrf_score)
 
+                ad = best.entity  # ActionDefinition — snapshot copied here
+
                 self.repository.update_action_mapping(
                     mapping_id=action.id,
-                    action_definition_id=best.entity.id,
+                    action_definition_id=ad.id,
                     similarity_score=float(best.rrf_score),
                     confidence=real_confidence,
                     query_text=query,
                     top_candidates=top_candidates_json,
+                    # ── snapshot ──────────────────────────────────────────
+                    action_name=ad.name,
+                    display_name=getattr(ad, "display_name", None),
+                    catalog_description=getattr(ad, "description", None),
+                    aliases=getattr(ad, "aliases", None),
+                    workflow_type=getattr(ad, "workflow_type", None),
+                    input_schema=getattr(ad, "input_schema", None),
+                    output_schema=getattr(ad, "output_schema", None),
+                    execution_template=getattr(ad, "execution_template", None),
                 )
             else:
-                # Mark unmapped with full diagnostics so we can see WHY
                 self.repository.mark_action_unmapped(
                     mapping_id=action.id,
                     query_text=query,
@@ -121,18 +128,43 @@ class EmbeddingMapper:
 
     def map_triggers(self) -> None:
         for trigger in self.repository.get_unmapped_triggers():
-            query     = f"{trigger.extracted_name} {trigger.description or ''}"
+            query     = f"{trigger.extracted_name} {trigger.description or ''}".strip()
             embedding = self._embed(trigger.extracted_name)
 
-            best: RankedCandidate | None = self.pipeline.search_triggers(
+            # Retrieve full top-K for observability (mirrors map_actions)
+            all_candidates = self.pipeline.search_triggers(
                 query=query, embedding=embedding
             )
+
+            # search_triggers may return a single best or a list depending on
+            # pipeline implementation — normalise to RankedCandidate | None
+            if isinstance(all_candidates, list):
+                from app.retrieval.thresholds import RetrievalType
+                best: RankedCandidate | None = self.pipeline._decision.decide(
+                    all_candidates, entity_type=RetrievalType.TRIGGER
+                ) if all_candidates else None
+            else:
+                # legacy: search_triggers returned best directly
+                best = all_candidates
+
             if best is None:
                 continue
 
+            td = best.entity  # TriggerDefinition — snapshot copied here
+
             self.repository.update_trigger_mapping(
                 mapping_id=trigger.id,
-                trigger_definition_id=best.entity.id,
+                trigger_definition_id=td.id,
                 similarity_score=float(best.rrf_score),
-                confidence=float(best.rrf_score),
+                confidence=(
+                    _sigmoid(float(best.cross_encoder_score))
+                    if best.cross_encoder_score is not None
+                    else float(best.rrf_score)
+                ),
+                # ── snapshot ──────────────────────────────────────────────
+                trigger_name=td.name,
+                display_name=getattr(td, "display_name", None),
+                catalog_description=getattr(td, "description", None),
+                aliases=getattr(td, "aliases", None),
+                workflow_type=getattr(td, "workflow_type", None),
             )

@@ -7,12 +7,55 @@ class TriggerExtraction(BaseModel):
     name: str = Field(..., description="Name of the trigger.")
     description: str = Field(..., description="Brief explanation of what starts the workflow.")
 
+    # Rules from the BRD that specifically apply to this trigger.
+    # Only include rules that are explicitly tied to this trigger event.
+    applicable_rules: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Business rules from the document that specifically apply to this trigger. "
+            "Only include rules explicitly tied to this trigger event. "
+            "Leave empty if no rules are directly associated."
+        ),
+    )
+
+    # Actors responsible for or involved in this trigger event.
+    responsible_actors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Actor names (and roles if stated) responsible for or involved in this trigger. "
+            "Format: 'Name (role)' if role is present, else just 'Name'. "
+            "Leave empty if no actors are directly associated."
+        ),
+    )
+
 
 class ActionReference(BaseModel):
     """Business action referenced in the BRD."""
 
     name: str = Field(..., description="Business action name.")
     description: str = Field(..., description="What this action is expected to do.")
+
+    # Rules from the BRD that specifically apply to this action.
+    # Only include rules that are explicitly tied to this action — not all workspace rules.
+    applicable_rules: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Business rules from the document that specifically apply to this action. "
+            "For example: 'Manual approval required above ₹5L' belongs to the approval action, "
+            "not to every action. Only include rules explicitly tied to this action. "
+            "Leave empty if no rules are directly associated."
+        ),
+    )
+
+    # Actors responsible for executing or approving this action.
+    responsible_actors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Actor names (and roles if stated) responsible for or involved in this action. "
+            "Format: 'Name (role)' if role is present, else just 'Name'. "
+            "Leave empty if no actors are directly associated."
+        ),
+    )
 
 
 class BusinessRule(BaseModel):

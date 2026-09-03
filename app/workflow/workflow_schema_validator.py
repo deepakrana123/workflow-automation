@@ -36,5 +36,5 @@ class WorkflowSchemaValidator:
                 errors.append("actions_name_missing")
 
             if "dependencies" not in actions:
-                errors.append(f"dependecies_missing:{actions.get('name')}")
+                errors.append(f"dependencies_missing:{actions.get('name')}")
         return SchemaValidationResult(valid=len(errors) == 0, errors=errors)

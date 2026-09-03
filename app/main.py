@@ -17,7 +17,6 @@ from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
 from app.routes.knowledge_ingestion import router as knowledge_ingestion_router
 from app.routes.workspace_integrations import router as workspace_integrations_router
-from app.routes.action_configurations import router as action_configurations_router
 from app.routes.human_tasks import router as human_tasks_router
 from app.routes.workspaces import router as workspaces_router
 from app.routes.capabilities import router as capabilities_router
@@ -65,7 +64,6 @@ app.include_router(search_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(knowledge_ingestion_router, prefix="/api")
 app.include_router(workspace_integrations_router, prefix="/api")
-app.include_router(action_configurations_router, prefix="/api")
 app.include_router(human_tasks_router, prefix="/api")
 app.include_router(workspaces_router, prefix="/api")
 app.include_router(capabilities_router, prefix="/api")

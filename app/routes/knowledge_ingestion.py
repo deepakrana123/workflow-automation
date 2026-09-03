@@ -23,6 +23,7 @@ def _ingest_one(
     service: KnowledgeIngestionService,
     file: UploadFile,
     workspace_id: int,
+    db,
 ) -> dict:
     """Ingest a single BRD, returning a per-file result (never raises).
 
@@ -141,7 +142,7 @@ def upload_brds(
         )
 
     service = KnowledgeIngestionService(db=db)
-    results = [_ingest_one(service, f, workspace_id) for f in files]
+    results = [_ingest_one(service, f, workspace_id, db) for f in files]
 
     succeeded = sum(1 for r in results if r["status"] == "success")
     return {

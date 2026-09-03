@@ -17,7 +17,6 @@ from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.workflow_business_rule import WorkflowBusinessRule
 from app.models.workflow_actor import WorkflowActor
 from app.models.workflow_external_system import WorkflowExternalSystem
-from app.models.action_configurations_model import ActionConfiguration
 from app.models.workspace_integration import WorkspaceIntegration
 from app.models.retrieval_eval import (
     EvaluationCase,
@@ -27,6 +26,7 @@ from app.models.retrieval_eval import (
 )
 from app.models.business_rule_definition import BusinessRuleDefinition
 from app.models.role_assignment import RoleAssignment
+from app.models.workflow_chain import WorkflowChain, ChainMatchType, ChainStatus
 
 __all__ = [
     "Workflow", "WorkflowRun", "WorkflowExecution", "ExecutionStep",
@@ -34,7 +34,8 @@ __all__ = [
     "GenerationLog", "TriggerDefinition", "ActionDefinition", "HumanTask",
     "Workspace", "WorkflowKnowledge", "WorkflowActionMapping", "MappingStatus",
     "WorkflowTriggerMapping", "WorkflowBusinessRule", "WorkflowActor",
-    "WorkflowExternalSystem", "ActionConfiguration", "WorkspaceIntegration",
+    "WorkflowExternalSystem", "WorkspaceIntegration",
     "EvaluationCase", "EvaluationRun", "EvaluationResult", "EvaluationCandidate",
     "BusinessRuleDefinition", "RoleAssignment",
+    "WorkflowChain", "ChainMatchType", "ChainStatus",
 ]

@@ -274,6 +274,57 @@ Examples
 
 ---
 
+# ASSOCIATING RULES AND ACTORS TO ACTIONS AND TRIGGERS
+
+Each action and each trigger has two optional fields:
+
+* **applicable_rules** — business rules from this document that apply **specifically** to this action or trigger
+* **responsible_actors** — actors who are responsible for or involved in **this specific** action or trigger
+
+## Rules for association
+
+**applicable_rules**:
+
+* Only include rules that are **explicitly and directly** tied to this action or trigger in the document.
+* A rule belongs to an action if the document states that rule in the context of that action.
+* Do NOT copy all business rules into every action.
+* Do NOT infer which rules might apply — only use what is explicitly stated.
+* If no rule is explicitly tied to this action, leave `applicable_rules` as an empty list.
+
+Examples
+
+Document says: "Manual approval is required for loans above ₹5,00,000."
+
+→ This rule belongs to the "Approve Loan" action only.
+→ It does NOT belong to "Verify KYC" or "Calculate EMI".
+
+Document says: "Customer must complete KYC before account creation."
+
+→ This rule belongs to both "Verify KYC" (precondition) and "Create Account" (gate).
+
+**responsible_actors**:
+
+* Only include actors who are **explicitly mentioned** as responsible for this action or trigger.
+* Format: "Name (role)" if role is stated, otherwise just "Name".
+* Do NOT assign all actors to all actions.
+* If no actor is explicitly tied to this action, leave `responsible_actors` as an empty list.
+
+Examples
+
+Document says: "The Branch Manager approves loans above ₹5,00,000."
+
+→ "Branch Manager (approver)" belongs to the "Approve Loan" action only.
+
+Document says: "Customer submits the loan application."
+
+→ "Customer (initiator)" belongs to the trigger only, not to every action.
+
+## Important
+
+The flat `business_rules` and `actors` lists at the top level must still contain ALL rules and actors extracted from the document. The per-action/per-trigger association is additional detail on top of the flat lists — it does not replace them.
+
+---
+
 # BANKING TERMINOLOGY
 
 Recognize common banking concepts including but not limited to
@@ -351,6 +402,10 @@ Use these concepts only when explicitly present in the document.
 
 18. Return valid JSON only.
 
+19. For applicable_rules: only include rules explicitly tied to that action or trigger. Leave empty if none.
+
+20. For responsible_actors: only include actors explicitly mentioned for that action or trigger. Leave empty if none.
+
 ---
 
 # FEW-SHOT EXAMPLES
@@ -367,6 +422,9 @@ Action
 
 Perform AML Screening
 
+applicable_rules: []
+responsible_actors: []
+
 ---
 
 Example 2
@@ -380,6 +438,9 @@ Output
 Action
 
 Notify Customer
+
+applicable_rules: []
+responsible_actors: []
 
 ---
 
@@ -395,13 +456,22 @@ Trigger
 
 Customer submits KYC Documents
 
+applicable_rules: []
+responsible_actors: ["Customer (initiator)"]
+
 Action
 
 Verify Customer Identity
 
+applicable_rules: []
+responsible_actors: []
+
 Action
 
 Validate KYC
+
+applicable_rules: []
+responsible_actors: []
 
 ---
 
@@ -409,13 +479,17 @@ Example 4
 
 Input
 
-"The system generates a new account number."
+"The Branch Manager approves loans above ₹5,00,000. The Credit Officer processes
+all other loans."
 
 Output
 
 Action
 
-Generate Account Number
+Approve Loan
+
+applicable_rules: ["Manual approval by Branch Manager required for loans above ₹5,00,000"]
+responsible_actors: ["Branch Manager (approver)", "Credit Officer (processor)"]
 
 ---
 
@@ -423,13 +497,24 @@ Example 5
 
 Input
 
-"Customer makes the first EMI payment."
+"Customer must complete KYC before account creation. The Relationship Manager
+verifies the documents."
 
 Output
 
-Trigger
+Action
 
-Customer Makes EMI Payment
+Verify KYC
+
+applicable_rules: ["KYC must be completed before account creation"]
+responsible_actors: ["Relationship Manager (verifier)"]
+
+Action
+
+Create Account
+
+applicable_rules: ["KYC must be completed before account creation"]
+responsible_actors: []
 
 ---
 

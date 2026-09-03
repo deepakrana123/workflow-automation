@@ -1,42 +1,55 @@
 """
 app/execution/runtime/config_resolver.py
 
-Resolves ActionConfiguration for a given action name and workflow context.
+Resolves the ActionDefinition for a given action name scoped to a workspace.
 
-Single authoritative implementation — used by both StepExecutor and RetryExecutor
-so the lookup logic is never duplicated.
+Resolution path:
+  action_name + workspace_id
+    → WorkflowActionMapping (matched_action_definition_id)
+       JOIN WorkflowKnowledge (workspace_id filter)
+    → ActionDefinition
+
+Falls back to a global lookup by action name when workspace_id is None
+(e.g. workflows generated outside any workspace).
+
+Returns the ActionDefinition ORM object, or None if not found.
+Never raises — logs a warning and returns None on any DB error.
 """
 
-from app.models.action_definitions import ActionDefinition
-from app.repositories.action_configuration_repository import ActionConfigurationRepository
-from app.models.action_configurations_model import ActionConfiguration
-from app.core.logger import logger
 from sqlalchemy.orm import Session
 
+from app.models.action_definitions import ActionDefinition
+from app.core.logger import logger
 
-def resolve_action_configuration(
+
+def resolve_action_definition(
     db: Session,
     action_name: str,
-    workflow_knowledge_id: int | None,
-    config_repo: ActionConfigurationRepository | None = None,
-) -> tuple[ActionConfiguration | None, str]:
+    workspace_id: int | None,
+) -> ActionDefinition | None:
     """
-    Load the active ActionConfiguration for an action.
+    Load the ActionDefinition for an action name.
 
     Resolution order:
-      1. If workflow_knowledge_id is available:
-         exact lookup by (workflow_knowledge_id, action_definition_id)
-      2. Fallback: latest active config by action_definition_id only.
+      1. If workspace_id is available:
+         workspace-scoped lookup via WorkflowActionMapping → WorkflowKnowledge.
+      2. Fallback: global lookup by action name (active=True).
 
-    Returns:
-        (ActionConfiguration, execution_type) if found.
-        (None, "python") if the action definition or config does not exist.
-
-    Never raises — logs a warning and returns (None, "python") on any DB error
-    so the caller can decide how to handle the missing config.
+    Returns ActionDefinition if found, None otherwise.
     """
     try:
-        action_def = (
+        if workspace_id is not None:
+            from app.knowledge_ingestions.workflow_repository import WorkflowRepository
+            repo = WorkflowRepository(db)
+            action_def = repo.get_action_definition_for_action(
+                workspace_id=workspace_id,
+                action_name=action_name,
+            )
+            if action_def is not None:
+                return action_def
+
+        # Fallback — global catalog lookup
+        return (
             db.query(ActionDefinition)
             .filter(
                 ActionDefinition.name == action_name,
@@ -45,33 +58,13 @@ def resolve_action_configuration(
             .first()
         )
 
-        if action_def is None:
-            return None, "python"
-
-        repo = config_repo or ActionConfigurationRepository(db)
-
-        if workflow_knowledge_id is not None:
-            config = repo.get_active_configuration(
-                workflow_knowledge_id=workflow_knowledge_id,
-                action_definition_id=action_def.id,
-            )
-        else:
-            config = repo.get_by_action_definition(
-                action_definition_id=action_def.id,
-            )
-
-        if config is None:
-            return None, "python"
-
-        return config, config.execution_type or "python"
-
     except Exception as exc:
         logger.warning(
             "config_resolver_lookup_failed",
             extra={"extra_data": {
-                "action_name":           action_name,
-                "workflow_knowledge_id": workflow_knowledge_id,
-                "error":                 str(exc),
+                "action_name": action_name,
+                "workspace_id": workspace_id,
+                "error": str(exc),
             }},
         )
-        return None, "python"
+        return None

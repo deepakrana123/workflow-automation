@@ -197,6 +197,8 @@ def generate_workspace_workflow_service(
     selected_action_ids: list[int] | None = None,
     nlp_service: NLPWorkflowService | None = None,
     persistence_service: WorkflowPersistenceService | None = None,
+    progress_callback=None,
+    budget_seconds: float | None = None,
 ) -> dict:
     """Workspace-scoped NL → workflow generation.
 
@@ -204,11 +206,30 @@ def generate_workspace_workflow_service(
     explicitly selected global actions) and the workspace's business rules —
     never the full global catalog.
 
+    Args:
+        progress_callback:  optional callable(event_name, data). Forwarded to
+                            NLPWorkflowService.generate() and also called here
+                            for compiled/step/explanation/saved/chains events.
+                            When None the function runs synchronously as before.
+        budget_seconds:     overall wall-clock budget for the LLM retry loop.
+                            Defaults to GENERATION_BUDGET_SECONDS env var.
+
     Raises:
         ValueError: invalid domain, workspace has no mapped actions, suitability
                     rejected, or all generation attempts failed.
         RuntimeError: unrecoverable LLM failure.
     """
+    from app.core.config import GENERATION_BUDGET_SECONDS
+    budget = budget_seconds if budget_seconds is not None else GENERATION_BUDGET_SECONDS
+
+    def _emit(event: str, data: dict) -> None:
+        """Push a progress event. Never raises — transport errors must not block generation."""
+        if progress_callback is not None:
+            try:
+                progress_callback(event, data)
+            except Exception:  # noqa: BLE001
+                pass
+
     if domain not in ALLOWED_DOMAINS:
         raise ValueError(
             f"Invalid domain '{domain}'. Allowed: {sorted(ALLOWED_DOMAINS)}"
@@ -218,15 +239,27 @@ def generate_workspace_workflow_service(
     if workspace is None:
         raise ValueError(f"Workspace {workspace_id} not found.")
 
+    _emit("started", {
+        "workspace_id":  workspace_id,
+        "name":          name,
+        "domain":        domain,
+        "budget_seconds": budget,
+    })
+
     # Workspace-scoped candidate set — the global catalog is never consulted.
     catalog_result = WorkspaceCatalogMatcher(db).match(
-        workspace_id, selected_action_ids or []
+        workspace_id, user_request, selected_action_ids or []
     )
     if not catalog_result.action_names:
         raise ValueError(
             "Workspace has no mapped actions to generate from. Ingest BRDs whose "
             "actions resolve to the catalog, or add actions explicitly."
         )
+
+    _emit("catalog_matched", {
+        "action_count":  len(catalog_result.action_names),
+        "trigger_count": len(catalog_result.trigger_names),
+    })
 
     extra_variables = build_workspace_prompt_vars(
         display_name=workspace.display_name,
@@ -235,6 +268,11 @@ def generate_workspace_workflow_service(
         rules=_workspace_business_rules(db, workspace_id),
     )
 
+    _emit("context_built", {
+        "actor_count": len(extra_variables.get("workspace_summary", "").split(",")),
+        "rule_count":  extra_variables.get("business_rules", "").count("\n") + 1,
+    })
+
     if nlp_service is None:
         nlp_service = _build_nlp_service(db)
     nlp_service._domain = domain
@@ -242,33 +280,90 @@ def generate_workspace_workflow_service(
     logger.info(
         "workspace_workflow_generation_started",
         extra={"extra_data": {
-            "workspace_id": workspace_id,
-            "user_request": user_request[:120],
-            "domain": domain,
+            "workspace_id":      workspace_id,
+            "user_request":      user_request[:120],
+            "domain":            domain,
             "candidate_actions": len(catalog_result.action_names),
         }},
     )
 
+    # NLP pipeline — emits llm_started / llm_attempt_failed / llm_success
+    # internally via the forwarded progress_callback
     compile_result = nlp_service.generate(
         user_request,
         catalog_result=catalog_result,
         extra_variables=extra_variables,
         prompt_version=WORKSPACE_PROMPT_VERSION,
+        progress_callback=progress_callback,
+        budget_seconds=budget,
     )
 
+    # Emit compiled + individual step events so the UI can animate the DAG
+    compiled = compile_result.get("compiled", {})
+    _emit("compiled", {
+        "step_count": len(compiled.get("steps", [])),
+        "trigger":    compiled.get("trigger", {}).get("event_type", ""),
+    })
+
+    # Resolve action mappings once for enriched step events (rules + actors)
+    from app.models.workflow_action_mapping import WorkflowActionMapping, MappingStatus
+    from app.models.workflow_knowledge import WorkflowKnowledge as _WK
+    action_meta: dict = {}
+    try:
+        rows = (
+            db.query(WorkflowActionMapping)
+            .join(_WK, _WK.id == WorkflowActionMapping.workflow_knowledge_id)
+            .filter(
+                _WK.workspace_id == workspace_id,
+                WorkflowActionMapping.status == MappingStatus.MAPPED,
+                WorkflowActionMapping.action_name.isnot(None),
+            )
+            .all()
+        )
+        action_meta = {
+            r.action_name: {
+                "display_name": r.display_name or r.action_name,
+                "rules":        r.applicable_rules or [],
+                "actors":       r.responsible_actors or [],
+            }
+            for r in rows
+        }
+    except Exception:  # noqa: BLE001
+        pass
+
+    for step in compiled.get("steps", []):
+        action_name = step.get("action", "")
+        meta = action_meta.get(action_name, {})
+        _emit("step", {
+            "id":           step.get("id"),
+            "action":       action_name,
+            "display_name": meta.get("display_name", action_name),
+            "depends_on":   step.get("depends_on", []),
+            "rules":        meta.get("rules", []),
+            "actors":       meta.get("actors", []),
+        })
+
+    # Explanation — best-effort, never blocks
     explanation = None
     try:
         explanation = WorkflowExplainer().explain(
-            compiled=compile_result.get("compiled", {}),
+            compiled=compiled,
             db=db,
             domain=domain,
         )
-    except Exception as exc:  # noqa: BLE001 - explanation is best-effort
+        if explanation:
+            _emit("explanation", {
+                "summary": explanation.get("summary", ""),
+                "trigger": explanation.get("trigger", {}),
+                "steps":   explanation.get("steps", []),
+            })
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "workspace_workflow_explanation_failed",
             extra={"extra_data": {"error": str(exc)}},
         )
 
+    # Persist
     persistence = persistence_service or WorkflowPersistenceService()
     saved = persistence.save(
         db=db,
@@ -279,14 +374,55 @@ def generate_workspace_workflow_service(
         explanation=explanation,
         workspace_id=workspace_id,
     )
+    _emit("saved", {
+        "workflow_id":  saved["workflow_id"],
+        "name":         saved["name"],
+        "workspace_id": workspace_id,
+    })
+
+    # Chain detection — separate session, never blocks the response
+    try:
+        from app.workflow.workflow_chain_detector import WorkflowChainDetector
+        from app.db.session import SessionLocal
+        chain_db = SessionLocal()
+        try:
+            chains = WorkflowChainDetector().detect(chain_db, workspace_id)
+            chain_db.commit()
+            if chains:
+                _emit("chains_detected", {
+                    "chains": [
+                        {
+                            "source_action":    c.source_action,
+                            "target_workflow":  c.target_workflow_id,
+                            "target_trigger":   c.target_trigger,
+                            "confidence":       round(c.confidence, 2),
+                            "match_type":       c.match_type,
+                        }
+                        for c in chains
+                    ],
+                })
+        finally:
+            chain_db.close()
+    except Exception as chain_exc:  # noqa: BLE001
+        logger.warning(
+            "post_generation_chain_detection_failed",
+            extra={"extra_data": {
+                "workspace_id": workspace_id,
+                "error":        str(chain_exc),
+            }},
+        )
+
+    _emit("done", {
+        "workflow_id": saved["workflow_id"],
+    })
 
     return {
-        "workflow_id": saved["workflow_id"],
-        "name": saved["name"],
-        "domain": saved["domain"],
-        "workspace_id": workspace_id,
-        "dsl": saved["dsl"],
-        "execution_plan": {},
+        "workflow_id":      saved["workflow_id"],
+        "name":             saved["name"],
+        "domain":           saved["domain"],
+        "workspace_id":     workspace_id,
+        "dsl":              saved["dsl"],
+        "execution_plan":   {},
         "parsed_rule_json": saved["parsed_rule_json"],
-        "explanation": saved.get("explanation"),
+        "explanation":      saved.get("explanation"),
     }

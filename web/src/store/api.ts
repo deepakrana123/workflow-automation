@@ -258,6 +258,78 @@ export const api = createApi({
       invalidatesTags: ["Workflows", "Workspaces"],
     }),
 
+    // ── Unmapped actions ──────────────────────────────────────────────────
+    getUnmappedActions: builder.query<any, number>({
+      query: (workspaceId) => `/workspaces/${workspaceId}/unmapped-actions`,
+      providesTags: ["Workspaces"],
+    }),
+    getActionSuggestions: builder.query<any, { workspaceId: number; mappingId: number; limit?: number }>({
+      query: ({ workspaceId, mappingId, limit = 10 }) =>
+        `/workspaces/${workspaceId}/unmapped-actions/${mappingId}/suggestions?limit=${limit}`,
+    }),
+    resolveUnmappedAction: builder.mutation<
+      any,
+      {
+        workspaceId: number;
+        mappingId: number;
+        action_definition_id?: number;
+        action_name?: string;
+        display_name?: string;
+        catalog_description?: string;
+        aliases?: string[];
+        workflow_type?: string;
+        execution_template?: any;
+      }
+    >({
+      query: ({ workspaceId, mappingId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/unmapped-actions/${mappingId}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: ["Workspaces"],
+    }),
+
+    // ── Workflow chains ───────────────────────────────────────────────────
+    detectChains: builder.mutation<any, number>({
+      query: (workspaceId) => ({
+        url: `/workspaces/${workspaceId}/detect-chains`,
+        method: "POST",
+      }),
+      invalidatesTags: ["Workspaces"],
+    }),
+    getChains: builder.query<any[], { workspaceId: number; status?: string }>({
+      query: ({ workspaceId, status }) => {
+        const qs = status ? `?status=${status}` : "";
+        return `/workspaces/${workspaceId}/chains${qs}`;
+      },
+      providesTags: ["Workspaces"],
+    }),
+    updateChain: builder.mutation<any, { workspaceId: number; chainId: number; status: string; note?: string }>({
+      query: ({ workspaceId, chainId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/chains/${chainId}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: ["Workspaces"],
+    }),
+
+    // ── Merge suggestions ─────────────────────────────────────────────────
+    suggestMerge: builder.mutation<any, { workspaceId: number; workflow_ids: number[] }>({
+      query: ({ workspaceId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/suggest-merge`,
+        method: "POST",
+        body,
+      }),
+    }),
+    acceptMerge: builder.mutation<any, { workspaceId: number; merged_name: string; domain: string; steps: any[]; workflow_label_map: Record<string, number> }>({
+      query: ({ workspaceId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/accept-merge`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Workflows", "Workspaces"],
+    }),
+
     // ── Workspace Integrations ────────────────────────────────────────────
     getIntegrations: builder.query<any[], number>({
       query: (workspaceId) => `/workspaces/${workspaceId}/integrations`,
@@ -282,32 +354,6 @@ export const api = createApi({
     deleteIntegration: builder.mutation<any, number>({
       query: (id) => ({ url: `/workspace-integrations/${id}`, method: "DELETE" }),
       invalidatesTags: ["Integrations"],
-    }),
-
-    // ── Action Configurations ─────────────────────────────────────────────
-    getConfigurations: builder.query<any[], number>({
-      query: (workflowKnowledgeId) =>
-        `/workflows/${workflowKnowledgeId}/action-configurations`,
-      providesTags: ["Configurations"],
-    }),
-    getConfiguration: builder.query<any, number>({
-      query: (id) => `/action-configurations/${id}`,
-    }),
-    updateConfiguration: builder.mutation<any, { id: number; body: any }>({
-      query: ({ id, body }) => ({
-        url: `/action-configurations/${id}`,
-        method: "PUT",
-        body,
-      }),
-      invalidatesTags: ["Configurations"],
-    }),
-    activateConfiguration: builder.mutation<any, number>({
-      query: (id) => ({ url: `/action-configurations/${id}/activate`, method: "PATCH" }),
-      invalidatesTags: ["Configurations"],
-    }),
-    deactivateConfiguration: builder.mutation<any, number>({
-      query: (id) => ({ url: `/action-configurations/${id}/deactivate`, method: "PATCH" }),
-      invalidatesTags: ["Configurations"],
     }),
 
     // ── Analytics (full) ──────────────────────────────────────────────────
@@ -486,17 +532,22 @@ export const {
   useGetWorkspaceWorkflowsQuery,
   useSynthesizeWorkspaceWorkflowMutation,
   useGenerateWorkspaceWorkflowMutation,
+  // Unmapped actions
+  useGetUnmappedActionsQuery,
+  useGetActionSuggestionsQuery,
+  useResolveUnmappedActionMutation,
+  // Chains
+  useDetectChainsMutation,
+  useGetChainsQuery,
+  useUpdateChainMutation,
+  // Merge
+  useSuggestMergeMutation,
+  useAcceptMergeMutation,
   // Integrations
   useGetIntegrationsQuery,
   useCreateIntegrationMutation,
   useUpdateIntegrationMutation,
   useDeleteIntegrationMutation,
-  // Configurations
-  useGetConfigurationsQuery,
-  useGetConfigurationQuery,
-  useUpdateConfigurationMutation,
-  useActivateConfigurationMutation,
-  useDeactivateConfigurationMutation,
   // Analytics
   useGetExecutionVolumeQuery,
   useGetFailuresQuery,

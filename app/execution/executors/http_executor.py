@@ -4,8 +4,8 @@ app/execution/executors/http_executor.py
 Executes external HTTP endpoints via WorkspaceIntegration.
 
 Flow:
-    ActionConfiguration
-        ↓  workspace_integration_id
+    ActionDefinition.execution_template
+        ↓  workspace_integration_id (from template or future WorkflowActionMapping override)
     WorkspaceIntegration  (base_url, authentication_type, credentials)
         ↓
     Build full URL  (base_url + configuration["endpoint"])
@@ -17,18 +17,17 @@ Flow:
     Map response via response_mapping  →  ActionResult
 """
 
-import json
 import re
 
 import requests
 
 from app.execution.executors.base_executor import BaseExecutor
-from app.models.action_configurations_model import ActionConfiguration
+from app.models.action_definitions import ActionDefinition
 from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
 
 
-# Default timeout used when not specified in ActionConfiguration.configuration
+# Default timeout used when not specified in execution_template
 _DEFAULT_TIMEOUT = 30
 
 
@@ -36,27 +35,22 @@ class HttpExecutor(BaseExecutor):
 
     def execute(
         self,
-        configuration: ActionConfiguration,
+        action_definition: ActionDefinition,
         context: dict,
     ) -> ActionResult:
-        cfg = configuration.configuration or {}
+        template = action_definition.execution_template or {}
+        cfg = template.get("configuration") or {}
 
-        # ── Load WorkspaceIntegration ─────────────────────────────────────────
-        if configuration.workspace_integration_id is None:
-            return ActionResult(
-                success=False,
-                error="http_executor: no workspace_integration_id on ActionConfiguration",
-                metadata={"skip_retry": True},
-            )
-
-        integration = configuration.workspace_integration
+        # workspace_integration is expected to be eager-loaded or accessible
+        # via action_definition. For now resolve from context if passed.
+        integration = context.get("_workspace_integration")
 
         if integration is None:
             return ActionResult(
                 success=False,
                 error=(
-                    f"http_executor: WorkspaceIntegration "
-                    f"{configuration.workspace_integration_id} not loaded"
+                    f"http_executor: no workspace_integration available "
+                    f"for action '{action_definition.name}'"
                 ),
                 metadata={"skip_retry": True},
             )
@@ -84,7 +78,7 @@ class HttpExecutor(BaseExecutor):
             extra={"extra_data": {
                 "method": method,
                 "url": url,
-                "action_configuration_id": configuration.id,
+                "action_definition_id": action_definition.id,
             }},
         )
 
@@ -115,7 +109,7 @@ class HttpExecutor(BaseExecutor):
             )
 
         # ── Evaluate success ──────────────────────────────────────────────────
-        success = response.ok   # True for 2xx
+        success = response.ok
 
         logger.info(
             "http_executor_response",
@@ -152,7 +146,6 @@ class HttpExecutor(BaseExecutor):
 
     @staticmethod
     def _auth_headers(integration) -> dict:
-        """Build Authorization header from WorkspaceIntegration credentials."""
         auth_type = integration.authentication_type
         creds     = integration.credentials or {}
 
@@ -172,7 +165,6 @@ class HttpExecutor(BaseExecutor):
             encoded  = base64.b64encode(f"{user}:{password}".encode()).decode()
             return {"Authorization": f"Basic {encoded}"}
 
-        # oauth2 — token expected to already be in credentials["access_token"]
         if auth_type == "oauth2":
             token = creds.get("access_token", "")
             return {"Authorization": f"Bearer {token}"}
@@ -181,10 +173,6 @@ class HttpExecutor(BaseExecutor):
 
     @staticmethod
     def _render_template(template: dict, context: dict) -> dict:
-        """
-        Replace {{variable}} placeholders in template values with context values.
-        Non-string values are passed through unchanged.
-        """
         result = {}
         for key, value in template.items():
             if isinstance(value, str):
@@ -198,17 +186,11 @@ class HttpExecutor(BaseExecutor):
 
     @staticmethod
     def _map_response(response_body: dict, mapping: dict) -> dict:
-        """
-        Extract fields from response_body using simple key mapping.
-        mapping = {"output_key": "response_key"} or {"output_key": "$.nested.key"}
-        Only top-level keys supported for now; JSONPath-style is a future extension.
-        """
         if not mapping:
             return response_body
 
         outputs = {}
         for output_key, source_key in mapping.items():
-            # Strip leading $. for basic path support
             path = source_key.lstrip("$").lstrip(".")
             parts = path.split(".")
             value = response_body

@@ -12,7 +12,7 @@ Rule for inclusion:
   screening, internal record creation, or database state changes.
 
   Communication/delivery actions (email, SMS, webhook) do NOT belong here.
-  Those are ActionConfiguration rows with execution_type=http.
+  Those are handled by HttpExecutor using WorkspaceIntegration credentials.
 
   Document generation (PDF/CSV/Excel) DOES belong here: it is internal Python
   logic that produces a file and persists it via the file storage layer,
@@ -137,12 +137,9 @@ from app.execution.domain_actions.car_loan_actions import (
     verify_vehicle_insurance,
     release_hypothecation,
 )
-<<<<<<< HEAD
 from app.execution.python.pdf.handler import generate_pdf
 from app.execution.python.csv.handler import generate_csv
 from app.execution.python.excel.handler import generate_excel
-=======
->>>>>>> e5fd98f2f2bdeb94b60cfd468072036defd97388
 from app.execution.chaos_actions import (
     chaos_escalate_case,
     chaos_assign_senior_officer,
@@ -236,14 +233,11 @@ _PRODUCTION_HANDLER_MAP: dict = {
     # Scheduling & internal assignment
     "schedule_customer_callback": schedule_customer_callback,
 
-<<<<<<< HEAD
     # Document generation (persisted via file storage layer)
     "generate_pdf":               generate_pdf,
     "generate_csv":               generate_csv,
     "generate_excel":             generate_excel,
 
-=======
->>>>>>> e5fd98f2f2bdeb94b60cfd468072036defd97388
     # Support — internal operations
     "create_support_ticket":      create_support_ticket,
     "assign_support_agent":       assign_support_agent,

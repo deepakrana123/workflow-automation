@@ -1,6 +1,5 @@
 from app.models.workflow_execution import WorkflowExecution
 from app.models.workflow import Workflow
-from app.models.workflow_knowledge import WorkflowKnowledge
 from app.execution.runtime.workflow_execution_service import (
     mark_workflow_running,
     mark_workflow_failed,
@@ -18,13 +17,11 @@ from app.core.logger import logger
 
 
 def runtime_processor(db, workflow_execution_id: int):
-    print(workflow_execution_id,"workflow_execution_id")
     workflow_execution = (
         db.query(WorkflowExecution)
         .filter(WorkflowExecution.id == workflow_execution_id)
         .first()
     )
-    print(workflow_execution,workflow_execution_id,"hlo hillo ")
 
     if not workflow_execution:
         logger.warning(
@@ -34,9 +31,6 @@ def runtime_processor(db, workflow_execution_id: int):
         return
 
     # Guard: skip if already past a resumable state (duplicate delivery from Redis).
-    # PENDING          — first dispatch
-    # PAUSED           — resumed after an operator pause
-    # WAITING_APPROVAL — resumed after a human approval decision
     if workflow_execution.status not in (
         WORKFLOW_STATUS_PENDING,
         WORKFLOW_STATUS_PAUSED,
@@ -56,7 +50,6 @@ def runtime_processor(db, workflow_execution_id: int):
     try:
         mark_workflow_running(db=db, workflow_execution=workflow_execution)
 
-        # Emit WORKFLOW_STARTED trace event
         trace_service.record_workflow_started(db=db, workflow_execution=workflow_execution)
 
         logger.info(
@@ -120,36 +113,18 @@ def runtime_processor(db, workflow_execution_id: int):
             )
             return
 
-        # Resolve workflow_knowledge_id by matching workflow name.
-        # Used downstream to load ActionConfiguration by
-        # (workflow_knowledge_id, action_definition_id).
-        # None when no BRD ingestion record exists for this workflow.
-        print(workflow,"workflow")
-        workflow_knowledge = (
-            db.query(WorkflowKnowledge)
-            .filter(WorkflowKnowledge.workflow_name == workflow.name)
-            .order_by(WorkflowKnowledge.id.desc())
-            .first()
-        )
-        print(workflow_knowledge,"print hlow")
-        workflow_knowledge_id = workflow_knowledge.id if workflow_knowledge else None
+        # workspace_id is passed directly from the Workflow row.
+        # It is None for globally-generated workflows (no workspace scope).
+        # The resolver falls back to global catalog lookup in that case.
+        workspace_id = workflow.workspace_id
 
-        if workflow_knowledge_id:
-            logger.info(
-                "runtime_processor_workflow_knowledge_resolved",
-                extra={"extra_data": {
-                    "workflow_id": workflow.id,
-                    "workflow_knowledge_id": workflow_knowledge_id,
-                }},
-            )
-        else:
-            logger.info(
-                "runtime_processor_workflow_knowledge_not_found",
-                extra={"extra_data": {
-                    "workflow_id": workflow.id,
-                    "workflow_name": workflow.name,
-                }},
-            )
+        logger.info(
+            "runtime_processor_workspace_resolved",
+            extra={"extra_data": {
+                "workflow_id":  workflow.id,
+                "workspace_id": workspace_id,
+            }},
+        )
 
         payload = {"entity_id": workflow_execution.entity_id}
 
@@ -158,7 +133,7 @@ def runtime_processor(db, workflow_execution_id: int):
             workflow_execution=workflow_execution,
             dag=dag,
             payload=payload,
-            workflow_knowledge_id=workflow_knowledge_id,
+            workspace_id=workspace_id,
         )
 
         finalize_workflow_execution(db=db, workflow_execution=workflow_execution)

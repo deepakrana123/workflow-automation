@@ -4,16 +4,16 @@ app/execution/executors/python_executor.py
 Executes internal Python handlers via ActionHandlerRegistry.
 
 Flow:
-    ActionConfiguration.configuration["handler"]
+    ActionDefinition.name
         ↓
-    ActionHandlerRegistry lookup
+    ActionHandlerRegistry lookup  (handler key = action name)
         ↓
-    handler(context, configuration)  →  ActionResult
+    handler(context, action_definition)  →  ActionResult
 """
 
 from app.execution.executors.base_executor import BaseExecutor
 from app.execution.exceptions import HandlerNotFoundError
-from app.models.action_configurations_model import ActionConfiguration
+from app.models.action_definitions import ActionDefinition
 from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
 
@@ -22,38 +22,31 @@ class PythonExecutor(BaseExecutor):
 
     def execute(
         self,
-        configuration: ActionConfiguration,
+        action_definition: ActionDefinition,
         context: dict,
     ) -> ActionResult:
         # Deferred import — breaks potential circular import at module load time
         from app.execution.python.action_handler_registry import ACTION_HANDLER_MAP
 
-        cfg          = configuration.configuration or {}
-        handler_name = cfg.get("handler")
-
-        if not handler_name:
-            raise HandlerNotFoundError(
-                handler_name=None,
-                action_configuration_id=configuration.id,
-            )
+        handler_name = action_definition.name
 
         handler = ACTION_HANDLER_MAP.get(handler_name)
 
         if not handler:
             raise HandlerNotFoundError(
                 handler_name=handler_name,
-                action_configuration_id=configuration.id,
+                action_configuration_id=None,
             )
 
         logger.info(
             "python_executor_dispatching",
             extra={"extra_data": {
-                "handler_name":            handler_name,
-                "action_configuration_id": configuration.id,
+                "handler_name":       handler_name,
+                "action_definition_id": action_definition.id,
             }},
         )
 
-        raw = handler(context, cfg)
+        raw = handler(context, {})
 
         # Normalise — handler may return ActionResult or legacy dict
         if isinstance(raw, ActionResult):

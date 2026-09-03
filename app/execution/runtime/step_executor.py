@@ -4,11 +4,11 @@ app/execution/runtime/step_executor.py
 Executes a single workflow step.
 
 Flow:
-    ActionConfiguration  (resolved via config_resolver)
-        ↓
+    resolve_action_definition(action_name, workspace_id)
+        ↓  ActionDefinition  (via WorkflowActionMapping → WorkflowKnowledge)
     ExecutorRegistry.get_executor(execution_type)
         ↓
-    executor.execute(configuration, context)
+    executor.execute(action_definition, context)
         ↓
     ActionResult  →  mark completed / failed / retry / DLQ
 """
@@ -26,11 +26,10 @@ from app.execution.runtime.step_execution_service import (
 )
 from app.execution.executors.constants import EXECUTION_STATUS_WAITING
 from app.repositories import human_task_repo
-from app.execution.runtime.config_resolver import resolve_action_configuration
+from app.execution.runtime.config_resolver import resolve_action_definition
 from app.execution.runtime.output_validation import validate_action_outputs
 from app.execution.executors.registry import get_executor as registry_get_executor
 from app.execution.exceptions import (
-    ConfigurationNotFoundError,
     ExecutorNotFoundError,
     HandlerNotFoundError,
 )
@@ -52,8 +51,8 @@ _CP_CREATE_STEP    = "create_step_execution"
 _CP_MARK_RUNNING   = "mark_step_running"
 _CP_TRACE_STARTED  = "record_step_started"
 _CP_INJECT_TRACE   = "inject_trace_into_payload"
-_CP_LOAD_CONFIG    = "load_action_configuration"
-_CP_RULE_CHECK     = "rule_evaluation"              # NEW
+_CP_RESOLVE_ACTION = "resolve_action_definition"
+_CP_RULE_CHECK     = "rule_evaluation"
 _CP_DISPATCH       = "executor_dispatch"
 _CP_MARK_COMPLETED = "mark_step_completed"
 _CP_MARK_FAILED    = "mark_step_failed"
@@ -66,7 +65,7 @@ def execute_workflow_step(
     workflow_execution,
     step_definition: dict,
     payload: dict,
-    workflow_knowledge_id: int | None = None,
+    workspace_id: int | None = None,
 ) -> dict:
     """
     Execute one step of the workflow DAG.
@@ -112,7 +111,7 @@ def execute_workflow_step(
             input_payload=payload,
         )
 
-        # ── CHECKPOINT: mark_step_running ─────────────────────────────────────
+        # ── CHECKPOINT: mark_step_running ────────────────────────────────────
         checkpoint = _CP_MARK_RUNNING
         mark_step_running(db=db, step_execution=step_execution)
 
@@ -135,7 +134,7 @@ def execute_workflow_step(
             },
         )
 
-        # ── CHECKPOINT: inject_trace_into_payload ─────────────────────────────
+        # ── CHECKPOINT: inject_trace_into_payload ────────────────────────────
         checkpoint = _CP_INJECT_TRACE
         traced_payload = inject_trace_into_payload(
             payload=payload,
@@ -150,26 +149,25 @@ def execute_workflow_step(
             action_name=action,
         )
 
-        # ── CHECKPOINT: load_action_configuration ────────────────────────────
-        checkpoint = _CP_LOAD_CONFIG
-        action_config, execution_type = resolve_action_configuration(
+        # ── CHECKPOINT: resolve_action_definition ────────────────────────────
+        checkpoint = _CP_RESOLVE_ACTION
+        action_def = resolve_action_definition(
             db=db,
             action_name=action,
-            workflow_knowledge_id=workflow_knowledge_id,
+            workspace_id=workspace_id,
         )
-        print(workflow_knowledge_id,action,"hlo")
 
-        if action_config is None:
-            raise ConfigurationNotFoundError(
-                action_name=action,
-                workflow_knowledge_id=workflow_knowledge_id,
+        if action_def is None:
+            raise HandlerNotFoundError(
+                handler_name=action,
+                action_configuration_id=None,
             )
 
+        # Determine execution_type from execution_template, default to python
+        template       = action_def.execution_template or {}
+        execution_type = template.get("execution_type", "python")
+
         # ── CHECKPOINT: rule_evaluation ──────────────────────────────────────
-        # Evaluate business_rules[] attached to this step against the current
-        # WorkflowContext (passed in via payload). This is the policy boundary:
-        # if a rule blocks, the step halts with RULE_BLOCKED — not FAILED.
-        # RULE_BLOCKED is not retried (policy hold, not transient error).
         checkpoint = _CP_RULE_CHECK
         context_outputs = {k: v for k, v in (payload or {}).items()
                            if not k.startswith("_")}
@@ -183,7 +181,6 @@ def execute_workflow_step(
                 db=db,
                 step_execution=step_execution,
             )
-            # Store rule evaluation result in output_payload so it's queryable
             step_execution.output_payload = {"rule_evaluations": metadata_entry}
             db.commit()
             logger.info(
@@ -193,8 +190,8 @@ def execute_workflow_step(
                         workflow_execution=workflow_execution,
                         execution_step=step_execution,
                         extra={
-                            "action":            action,
-                            "blocking_rule":     metadata_entry.get("blocking_rule"),
+                            "action":        action,
+                            "blocking_rule": metadata_entry.get("blocking_rule"),
                         },
                     )
                 },
@@ -209,7 +206,7 @@ def execute_workflow_step(
 
         _t0 = time.perf_counter()
         result = executor.execute(
-            configuration=action_config,
+            action_definition=action_def,
             context=traced_payload,
         )
         duration_ms = round((time.perf_counter() - _t0) * 1000, 2)
@@ -217,35 +214,29 @@ def execute_workflow_step(
         logger.info(
             "execution_log",
             extra={"extra_data": {
-                "workflow_id":           getattr(workflow_execution, "workflow_id", None),
-                "workflow_knowledge_id": workflow_knowledge_id,
-                "action_definition_id":  action_config.action_definition_id,
-                "execution_type":        execution_type,
-                "executor":              executor_name,
-                "duration_ms":           duration_ms,
-                "success":               result.success,
-                "error":                 result.error if not result.success else None,
+                "workflow_id":          getattr(workflow_execution, "workflow_id", None),
+                "workspace_id":         workspace_id,
+                "action_definition_id": action_def.id,
+                "execution_type":       execution_type,
+                "executor":             executor_name,
+                "duration_ms":          duration_ms,
+                "success":              result.success,
+                "error":                result.error if not result.success else None,
             }},
         )
 
         # ── Human-in-the-loop: step suspends for approval ────────────────────
-        # Detected BEFORE the success/failure branches. The step is neither
-        # completed nor failed and is NOT retried — it waits for a decision.
         if result.metadata.get("execution_status") == EXECUTION_STATUS_WAITING:
             checkpoint = _CP_MARK_WAITING
             mark_step_waiting(db=db, step_execution=step_execution)
 
             spec = result.metadata.get("human_task", {}) or {}
 
-            # Collect allowed_roles from the step's business_rules
-            # (populated by RuleInjector) or from the human_task spec itself.
             step_allowed_roles: list[str] = []
             for br in step_definition.get("business_rules") or []:
                 step_allowed_roles.extend(br.get("allowed_roles") or [])
-            # Also accept explicit override in the human_task spec
             if spec.get("allowed_roles"):
                 step_allowed_roles = spec["allowed_roles"]
-            # Deduplicate, preserve order
             seen: set[str] = set()
             deduped_roles = [r for r in step_allowed_roles if not (r in seen or seen.add(r))]
 
@@ -277,10 +268,10 @@ def execute_workflow_step(
         skip_retry = result.metadata.get("skip_retry", False)
 
         if success:
-            # Non-fatal: validate outputs against the action's output_schema so
-            # the rule engine knows which fields are contract-guaranteed.
             output_validation = validate_action_outputs(
-                db=db, action_configuration=action_config, outputs=result.outputs
+                db=db,
+                action_definition_id=action_def.id,
+                outputs=result.outputs,
             )
             if output_validation is not None:
                 result.metadata["output_validation"] = output_validation
@@ -317,7 +308,7 @@ def execute_workflow_step(
             )
             return {"success": True, "result": result.model_dump()}
 
-        # ── CHECKPOINT: mark_step_failed ──────────────────────────────────────
+        # ── CHECKPOINT: mark_step_failed ─────────────────────────────────────
         checkpoint = _CP_MARK_FAILED
         step_error = result.error or str(result.outputs)
         mark_step_failed(db=db, step_execution=step_execution, error=step_error)
@@ -346,7 +337,7 @@ def execute_workflow_step(
             },
         )
 
-        # ── CHECKPOINT: handle_retry ──────────────────────────────────────────
+        # ── CHECKPOINT: handle_retry ─────────────────────────────────────────
         checkpoint = _CP_RETRY
         retry_result = handle_retry(
             db=db,
@@ -365,8 +356,7 @@ def execute_workflow_step(
         )
         return {"success": False, "result": result.model_dump()}
 
-    except (ConfigurationNotFoundError, ExecutorNotFoundError, HandlerNotFoundError) as exc:
-        # Non-retryable execution errors — known, specific, no stack trace needed
+    except (ExecutorNotFoundError, HandlerNotFoundError) as exc:
         step_error = str(exc)
         logger.error(
             "step_execution_error",
@@ -394,14 +384,13 @@ def execute_workflow_step(
                     step_execution=step_execution,
                     error=step_error,
                     workflow_execution=workflow_execution,
-                    skip_retry=True,  # non-retryable
+                    skip_retry=True,
                 )
             except Exception:
                 pass
         return {"success": False, "error": step_error}
 
     except Exception as exc:
-        # Unexpected exceptions — full traceback for diagnosis
         step_error = str(exc)
         logger.error(
             "step_execution_failed",

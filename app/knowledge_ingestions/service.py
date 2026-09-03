@@ -1,7 +1,7 @@
 from pathlib import Path
 from sqlalchemy.orm import Session
 
-from app.knowledge_ingestions.extractor import DocumentExtractor
+from app.knowledge_ingestions.multimodal_extractor import MultiModalDocumentExtractor
 from app.knowledge_ingestions.worfklow_extractors import WorkflowExtractor
 from app.knowledge_ingestions.workflow_repository import WorkflowRepository
 from app.knowledge_ingestions.embedding_mapper import EmbeddingMapper
@@ -37,14 +37,18 @@ class KnowledgeIngestionService:
     def __init__(
         self,
         db: Session,
-        document_extractor: DocumentExtractor | None = None,
+        document_extractor: MultiModalDocumentExtractor | None = None,
         workflow_extractor: WorkflowExtractor | None = None,
         repository: WorkflowRepository | None = None,
         embedding_mapper: EmbeddingMapper | None = None,
     ):
         self.db                  = db
         self.repository         = repository or WorkflowRepository(db)
-        self.document_extractor = document_extractor or DocumentExtractor()
+        # MultiModalDocumentExtractor replaces the old DocumentExtractor.
+        # It resolves providers from env vars (VISION_PROVIDER, TEXT_PROVIDER)
+        # at construction time. Plain-text-only PDFs take the fast pypdf path
+        # automatically — no vision API calls are made unless needed.
+        self.document_extractor = document_extractor or MultiModalDocumentExtractor()
         self.workflow_extractor  = workflow_extractor or WorkflowExtractor()
         if embedding_mapper is not None:
             self.embedding_mapper = embedding_mapper

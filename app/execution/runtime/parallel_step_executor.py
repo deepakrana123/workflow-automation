@@ -9,7 +9,7 @@ def execute_single_step(
     workflow_execution_id: int,
     step_definition: dict,
     payload: dict,
-    workflow_knowledge_id: int | None = None,
+    workspace_id: int | None = None,
 ):
     db = SessionLocal()
     try:
@@ -32,7 +32,7 @@ def execute_single_step(
             workflow_execution=workflow_execution,
             step_definition=step_definition,
             payload=payload,
-            workflow_knowledge_id=workflow_knowledge_id,
+            workspace_id=workspace_id,
         )
 
         return {"step_id": step_definition["id"], "result": result}
@@ -45,7 +45,7 @@ def execute_parallel_steps(
     workflow_execution_id: int,
     ready_steps: list,
     payload: dict,
-    workflow_knowledge_id: int | None = None,
+    workspace_id: int | None = None,
 ):
     results = []
     with ThreadPoolExecutor(max_workers=len(ready_steps)) as executor:
@@ -55,7 +55,7 @@ def execute_parallel_steps(
                 workflow_execution_id,
                 step,
                 payload,
-                workflow_knowledge_id,
+                workspace_id,
             )
             for step in ready_steps
         ]
