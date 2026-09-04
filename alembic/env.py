@@ -27,12 +27,12 @@ from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.workflow_business_rule import WorkflowBusinessRule
 from app.models.workflow_actor import WorkflowActor
 from app.models.workflow_external_system import WorkflowExternalSystem
-from app.models.action_configurations_model import ActionConfiguration
 from app.models.workspace import Workspace
 from app.models.workspace_integration import WorkspaceIntegration
 from app.models.retrieval_eval import EvaluationCase, EvaluationRun, EvaluationResult, EvaluationCandidate
 from app.models.business_rule_definition import BusinessRuleDefinition
 from app.models.role_assignment import RoleAssignment
+from app.models.workflow_chain import WorkflowChain
 config = context.config
 
 # Override sqlalchemy.url from .env — never store credentials in alembic.ini

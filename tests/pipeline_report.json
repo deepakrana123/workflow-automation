@@ -1,0 +1,79 @@
+{
+  "workspaces": {
+    "2": {
+      "workspace": {
+        "id": 2,
+        "name": "workflow_testing_1",
+        "display_name": "loan or core account processing",
+        "description": null,
+        "organization_name": "loan bank of india",
+        "active": true,
+        "level": "branch",
+        "parent_id": null,
+        "created_at": "2026-08-09T08:48:47.084526Z",
+        "updated_at": "2026-08-09T08:48:47.084526Z"
+      },
+      "overview_error": "Internal Server Error",
+      "actions_error": "Internal Server Error",
+      "unmapped_error": "Internal Server Error",
+      "business_rules_error": "Internal Server Error",
+      "generation": {
+        "status": "failed",
+        "http": 500,
+        "error": "Internal Server Error",
+        "elapsed_s": 3.18
+      },
+      "existing_workflows": 0,
+      "chains_error": "Internal Server Error",
+      "diagnostics_error": "Internal Server Error"
+    },
+    "34": {
+      "workspace_error": "{\"detail\":\"Workspace not found.\"}",
+      "overview_error": "{\"detail\":\"Workspace not found.\"}",
+      "actions_error": "{\"detail\":\"Workspace not found.\"}",
+      "unmapped_error": "{\"detail\":\"Workspace not found.\"}",
+      "business_rules_error": "{\"detail\":\"Workspace not found.\"}",
+      "generation": {
+        "status": "failed",
+        "http": 404,
+        "error": "{\"detail\":\"Workspace not found.\"}",
+        "elapsed_s": 2.69
+      },
+      "existing_workflows": 0,
+      "chains_error": "{\"detail\":\"Workspace not found.\"}",
+      "diagnostics_error": "{\"detail\":\"Workspace not found.\"}"
+    },
+    "5": {
+      "workspace": {
+        "id": 5,
+        "name": "test loan",
+        "display_name": "loan",
+        "description": null,
+        "organization_name": "",
+        "active": true,
+        "level": "branch",
+        "parent_id": null,
+        "created_at": "2026-08-16T04:26:33.953226Z",
+        "updated_at": "2026-08-16T04:26:33.953226Z"
+      },
+      "overview_error": "Internal Server Error",
+      "actions_error": "Internal Server Error",
+      "unmapped_error": "Internal Server Error",
+      "business_rules_error": "Internal Server Error",
+      "generation": {
+        "status": "failed",
+        "http": 500,
+        "error": "Internal Server Error",
+        "elapsed_s": 3.2
+      },
+      "existing_workflows": 0,
+      "chains_error": "Internal Server Error",
+      "diagnostics_error": "Internal Server Error"
+    }
+  },
+  "vulnerabilities": [
+    "WS2: Generation failed \u2014 failed: Internal Server Error",
+    "WS34: Generation failed \u2014 failed: {\"detail\":\"Workspace not found.\"}",
+    "WS5: Generation failed \u2014 failed: Internal Server Error"
+  ]
+}
