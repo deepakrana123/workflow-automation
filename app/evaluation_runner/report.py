@@ -7,7 +7,7 @@ Console report generators for evaluation runs.
 from __future__ import annotations
 from sqlalchemy.orm import Session
 
-from app.models.retrieval_eval import EvaluationRun, EvaluationResult, EvaluationCase, EvaluationCandidate
+from app.models.evaluation_case import EvaluationCase
 from app.evaluation_runner.metrics import aggregate, CaseMetrics
 
 

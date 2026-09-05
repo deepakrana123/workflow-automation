@@ -32,8 +32,6 @@ load_dotenv()
 from app.db.session import SessionLocal
 from app.evaluation_runner.importer import import_cases
 from app.evaluation_runner.report import print_aggregate, print_per_case, print_compare
-from app.models.retrieval_eval import EvaluationRun
-
 
 def _build_pipeline(db):
     from app.knowledge_ingestions.workflow_repository import WorkflowRepository
@@ -126,20 +124,7 @@ def cmd_compare(args):
         db.close()
 
 
-def cmd_list(args):
-    db = SessionLocal()
-    try:
-        runs = db.query(EvaluationRun).order_by(EvaluationRun.created_at.desc()).all()
-        if not runs:
-            print("No evaluation runs yet.")
-            return
-        print(f"\n{'ID':<6} {'Name':<40} {'Created'}")
-        print("─" * 70)
-        for r in runs:
-            print(f"  {r.id:<4} {r.name:<40} {r.created_at.strftime('%Y-%m-%d %H:%M')}")
-        print()
-    finally:
-        db.close()
+
 
 
 def main():
@@ -187,7 +172,7 @@ def main():
         "evaluate":     cmd_evaluate,
         "report":       cmd_report,
         "compare":      cmd_compare,
-        "list":         cmd_list,
+        
     }
     dispatch[args.command](args)
 

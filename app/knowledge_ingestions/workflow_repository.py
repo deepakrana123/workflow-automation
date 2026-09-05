@@ -3,7 +3,6 @@ from app.models.workflow_trigger_mapping import WorkflowTriggerMapping
 from app.models.workflow_action_mapping import WorkflowActionMapping, MappingStatus
 from app.models.workflow_business_rule import WorkflowBusinessRule
 from app.models.workflow_actor import WorkflowActor
-from app.models.workflow_external_system import WorkflowExternalSystem
 from app.knowledge_ingestions.schemas import WorkflowExtraction
 from sqlalchemy.orm import Session
 from app.models.action_definitions import ActionDefinition
@@ -78,14 +77,6 @@ class WorkflowRepository:
                 )
             )
 
-        for system in workflow.external_systems:
-            self.db.add(
-                WorkflowExternalSystem(
-                    workflow_knowledge_id=knowledge.id,
-                    name=system.name,
-                    description=system.description,
-                )
-            )
         self.db.flush()
         return knowledge
 

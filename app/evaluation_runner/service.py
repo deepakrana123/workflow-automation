@@ -19,12 +19,9 @@ import math
 
 from sqlalchemy.orm import Session
 
-from app.models.retrieval_eval import (
+from app.models.evalution_case import 
     EvaluationCase,
-    EvaluationRun,
-    EvaluationResult,
-    EvaluationCandidate,
-)
+
 from app.models.action_definitions import ActionDefinition
 from app.evaluation_runner.metrics import compute_case_metrics, aggregate, AggregateMetrics
 from app.retrieval.pipeline import RetrievalPipeline

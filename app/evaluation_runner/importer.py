@@ -17,7 +17,7 @@ from io import StringIO
 
 from sqlalchemy.orm import Session
 
-from app.models.retrieval_eval import EvaluationCase
+from app.models.evaluation_case import EvaluationCase
 from app.models.action_definitions import ActionDefinition
 
 
