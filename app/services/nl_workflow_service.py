@@ -195,6 +195,7 @@ def generate_workspace_workflow_service(
     user_request: str,
     domain: str,
     selected_action_ids: list[int] | None = None,
+    brd_id: int | None = None,
     nlp_service: NLPWorkflowService | None = None,
     persistence_service: WorkflowPersistenceService | None = None,
     progress_callback=None,
@@ -207,6 +208,9 @@ def generate_workspace_workflow_service(
     never the full global catalog.
 
     Args:
+        brd_id:             optional workflow_knowledge_id — when set, restricts
+                            the candidate action/trigger set to that single BRD.
+                            When None, all mapped BRDs in the workspace are used.
         progress_callback:  optional callable(event_name, data). Forwarded to
                             NLPWorkflowService.generate() and also called here
                             for compiled/step/explanation/saved/chains events.
@@ -244,11 +248,12 @@ def generate_workspace_workflow_service(
         "name":          name,
         "domain":        domain,
         "budget_seconds": budget,
+        "brd_id":        brd_id,
     })
 
     # Workspace-scoped candidate set — the global catalog is never consulted.
     catalog_result = WorkspaceCatalogMatcher(db).match(
-        workspace_id, user_request, selected_action_ids or []
+        workspace_id, user_request, selected_action_ids or [], brd_id=brd_id
     )
     if not catalog_result.action_names:
         raise ValueError(

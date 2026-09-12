@@ -27,7 +27,7 @@ from app.repositories import generation_log_repo
 from app.core.logger import logger
 
 MAX_RETRIES = 3
-FALLBACK_PROVIDERS = ["gemini"]
+FALLBACK_PROVIDERS = ["groq", "openrouter", "openai", "gemini", "ollama"]
 
 
 class NLPWorkflowService:

@@ -23,14 +23,15 @@ def start_reaper():
         db = SessionLocal()
 
         try:
-            # Auto-resolve human approval tasks whose timeout has elapsed,
-            # applying each task's configured on_timeout (approve|reject).
+            # Process timed-out human tasks:
+            #   - Escalate if escalation_policy allows another level.
+            #   - Auto-resolve via on_timeout once escalation is exhausted.
             try:
-                resolved = human_task_service.resolve_timed_out_tasks(db)
-                if resolved:
+                ht_result = human_task_service.handle_timed_out_tasks(db)
+                if ht_result["escalated"] or ht_result["resolved"]:
                     logger.info(
-                        "reaper_resolved_timed_out_human_tasks",
-                        extra={"extra_data": {"count": resolved}},
+                        "reaper_processed_timed_out_human_tasks",
+                        extra={"extra_data": ht_result},
                     )
             except Exception as ht_err:
                 logger.error(

@@ -4,16 +4,23 @@ app/execution/runtime/config_resolver.py
 Resolves the ActionDefinition for a given action name scoped to a workspace.
 
 Resolution path:
-  action_name + workspace_id
-    → WorkflowActionMapping (matched_action_definition_id)
-       JOIN WorkflowKnowledge (workspace_id filter)
-    → ActionDefinition
+  1. workspace_id provided:
+     WorkflowActionMapping.action_name == action_name
+       + WorkflowKnowledge.workspace_id filter
+     → synthesize ActionDefinition from snapshot (handles both Mode A and
+       Mode B workspace-local actions correctly)
+     → fall through to ActionDefinition row if snapshot has no execution_template
 
-Falls back to a global lookup by action name when workspace_id is None
-(e.g. workflows generated outside any workspace).
+  2. workspace_id is None (globally-generated workflow):
+     Direct ActionDefinition.name lookup (global catalog fallback).
 
-Returns the ActionDefinition ORM object, or None if not found.
-Never raises — logs a warning and returns None on any DB error.
+  3. Last resort (handler map):
+     If DB has no row at all but the action name is registered in
+     ACTION_HANDLER_MAP, synthesize a minimal ActionDefinition so the
+     PythonExecutor Tier-1 path can still run.
+
+Returns the ActionDefinition ORM object (or a synthetic equivalent), or None.
+Never raises.
 """
 
 from sqlalchemy.orm import Session
@@ -27,16 +34,6 @@ def resolve_action_definition(
     action_name: str,
     workspace_id: int | None,
 ) -> ActionDefinition | None:
-    """
-    Load the ActionDefinition for an action name.
-
-    Resolution order:
-      1. If workspace_id is available:
-         workspace-scoped lookup via WorkflowActionMapping → WorkflowKnowledge.
-      2. Fallback: global lookup by action name (active=True).
-
-    Returns ActionDefinition if found, None otherwise.
-    """
     try:
         if workspace_id is not None:
             from app.knowledge_ingestions.workflow_repository import WorkflowRepository
@@ -48,8 +45,8 @@ def resolve_action_definition(
             if action_def is not None:
                 return action_def
 
-        # Fallback — global catalog lookup
-        return (
+        # Global catalog fallback (non-workspace workflows or workspace miss)
+        action_def = (
             db.query(ActionDefinition)
             .filter(
                 ActionDefinition.name == action_name,
@@ -57,14 +54,37 @@ def resolve_action_definition(
             )
             .first()
         )
+        if action_def is not None:
+            return action_def
+
+        # Last resort: action is in the handler map but has no DB row.
+        # Synthesize a minimal ActionDefinition so Tier-1 execution proceeds.
+        from app.execution.python.action_handler_registry import ACTION_HANDLER_MAP
+        if action_name in ACTION_HANDLER_MAP:
+            synthetic = ActionDefinition()
+            synthetic.id               = 0
+            synthetic.name             = action_name
+            synthetic.display_name     = action_name.replace("_", " ").title()
+            synthetic.active           = True
+            synthetic.workflow_type    = "finance"
+            synthetic.aliases          = []
+            synthetic.input_schema     = None
+            synthetic.output_schema    = None
+            synthetic.execution_template = {
+                "execution_type": "python",
+                "configuration":  {"handler": action_name},
+            }
+            return synthetic
+
+        return None
 
     except Exception as exc:
         logger.warning(
             "config_resolver_lookup_failed",
             extra={"extra_data": {
-                "action_name": action_name,
+                "action_name":  action_name,
                 "workspace_id": workspace_id,
-                "error": str(exc),
+                "error":        str(exc),
             }},
         )
         return None

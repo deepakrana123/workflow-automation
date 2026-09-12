@@ -104,9 +104,9 @@ export const api = createApi({
       query: (id) => `/human-tasks/${id}`,
       providesTags: ["HumanTasks"],
     }),
-    decideHumanTask: builder.mutation<any, { id: number; decision: "approve" | "reject" }>({
-      query: ({ id, decision }) => ({
-        url: `/human-tasks/${id}/decision`,
+    decideHumanTask: builder.mutation<any, { id: number; decision: "approve" | "reject"; actor_role?: string }>({
+      query: ({ id, decision, actor_role }) => ({
+        url: `/human-tasks/${id}/decision${actor_role ? `?actor_role=${encodeURIComponent(actor_role)}` : ""}`,
         method: "POST",
         body: { decision },
       }),
@@ -151,6 +151,7 @@ export const api = createApi({
         method: "POST",
         body: formData,
       }),
+      invalidatesTags: ["Workspaces"],
     }),
 
     // ── Traces ────────────────────────────────────────────────────────────
@@ -252,6 +253,17 @@ export const api = createApi({
     >({
       query: ({ workspaceId, ...body }) => ({
         url: `/workspaces/${workspaceId}/generate`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Workflows", "Workspaces"],
+    }),
+    generateBRDWorkflow: builder.mutation<
+      any,
+      { workspaceId: number; brdId: number; name: string; user_request: string; domain?: string }
+    >({
+      query: ({ workspaceId, brdId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/brds/${brdId}/generate`,
         method: "POST",
         body,
       }),
@@ -532,6 +544,7 @@ export const {
   useGetWorkspaceWorkflowsQuery,
   useSynthesizeWorkspaceWorkflowMutation,
   useGenerateWorkspaceWorkflowMutation,
+  useGenerateBRDWorkflowMutation,
   // Unmapped actions
   useGetUnmappedActionsQuery,
   useGetActionSuggestionsQuery,

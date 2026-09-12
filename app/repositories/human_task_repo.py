@@ -113,3 +113,25 @@ def get_timed_out_pending(db: Session) -> list[HumanTask]:
         )
         .all()
     )
+
+
+def escalate_task(
+    db: Session,
+    task: HumanTask,
+    *,
+    new_role: str,
+    timeout_minutes: int,
+) -> HumanTask:
+    """
+    Escalate a PENDING task to the next level.
+
+    - Increments escalation_level.
+    - Replaces allowed_roles with [new_role].
+    - Resets timeout_at to now + timeout_minutes.
+    """
+    task.escalation_level = (task.escalation_level or 0) + 1
+    task.allowed_roles    = [new_role]
+    task.timeout_at       = datetime.now(timezone.utc) + timedelta(minutes=timeout_minutes)
+    db.commit()
+    db.refresh(task)
+    return task

@@ -64,6 +64,15 @@ class KnowledgeIngestionService:
     ):
         document_text = self.document_extractor.extract(file_path)
         workflow      = self.workflow_extractor.extract(document_text)
+
+        if not workflow.action_references:
+            from app.knowledge_ingestions.exceptions import WorkflowExtractionError
+            raise WorkflowExtractionError(
+                f"No actions could be extracted from this document. "
+                f"Workflow: '{workflow.workflow_name}'. "
+                f"Summary: {workflow.summary}"
+            )
+
         try:
             knowledge = self.repository.save(
                 workflow,

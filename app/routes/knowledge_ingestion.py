@@ -19,6 +19,72 @@ router = APIRouter(prefix="/knowledge-ingestion", tags=["knowledge-ingestion"])
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
 
 
+def _try_auto_synthesize(workspace_id: int, trigger_filename: str) -> None:
+    """Fire WorkspaceWorkflowSynthesizer in an isolated session.
+
+    Runs only when the workspace has ≥ 2 BRDs with mapped actions so there is
+    something meaningful to merge. Failures are logged and swallowed — they
+    must never affect the upload response.
+    """
+    try:
+        from app.db.session import SessionLocal
+        from app.models.workflow_knowledge import WorkflowKnowledge
+        from app.models.workflow_action_mapping import WorkflowActionMapping, MappingStatus
+        from app.workflow.workspace_workflow_synthesizer import WorkspaceWorkflowSynthesizer
+
+        synth_db = SessionLocal()
+        try:
+            # Count BRDs that have at least one MAPPED action
+            brd_ids_with_actions = (
+                synth_db.query(WorkflowKnowledge.id)
+                .join(
+                    WorkflowActionMapping,
+                    WorkflowActionMapping.workflow_knowledge_id == WorkflowKnowledge.id,
+                )
+                .filter(
+                    WorkflowKnowledge.workspace_id == workspace_id,
+                    WorkflowActionMapping.status == MappingStatus.MAPPED,
+                )
+                .distinct()
+                .count()
+            )
+
+            if brd_ids_with_actions < 2:
+                return  # nothing to merge yet
+
+            WorkspaceWorkflowSynthesizer().synthesize(
+                db=synth_db,
+                workspace_id=workspace_id,
+                name=f"Auto-merged workflow (after {trigger_filename})",
+                domain="finance",
+            )
+            synth_db.commit()
+            logger.info(
+                "auto_merge_synthesized",
+                extra={"extra_data": {
+                    "workspace_id": workspace_id,
+                    "trigger_filename": trigger_filename,
+                    "brd_count": brd_ids_with_actions,
+                }},
+            )
+        except Exception as exc:
+            synth_db.rollback()
+            logger.warning(
+                "auto_merge_failed",
+                extra={"extra_data": {
+                    "workspace_id": workspace_id,
+                    "error": str(exc),
+                }},
+            )
+        finally:
+            synth_db.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "auto_merge_session_error",
+            extra={"extra_data": {"workspace_id": workspace_id, "error": str(exc)}},
+        )
+
+
 def _ingest_one(
     service: KnowledgeIngestionService,
     file: UploadFile,
@@ -81,6 +147,12 @@ def _ingest_one(
                 "workspace_id": workspace_id,
             }},
         )
+
+        # ── Auto-merge: synthesize when workspace now has ≥ 2 BRDs ──────────
+        # Runs in a separate session so a synthesis failure never rolls back
+        # the successful ingest. Best-effort — errors are logged, not raised.
+        _try_auto_synthesize(workspace_id, file.filename)
+
         return {
             "filename": file.filename,
             "status": "success",

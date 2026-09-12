@@ -1,4 +1,7 @@
 from app.nlp.llm_manager.providers.gemini_rest import try_call_gemini_rest
+from app.nlp.llm_manager.providers.groq import try_call_groq
+from app.nlp.llm_manager.providers.openrouter import try_call_openrouter
+from app.nlp.llm_manager.providers.openai_provider import try_call_openai
 from app.nlp.llm_manager.providers.ollama import try_call_ollama
 from app.nlp.llm_manager import provider_health as health
 from app.core.logger import logger
@@ -8,8 +11,11 @@ class LLMManager:
 
     def __init__(self):
         self.providers = [
-            ("ollama", try_call_ollama),
-            ("gemini", try_call_gemini_rest),
+            ("gemini",     try_call_gemini_rest),
+            ("groq",       try_call_groq),
+            ("openrouter", try_call_openrouter),
+            ("openai",     try_call_openai),
+            ("ollama",     try_call_ollama),
         ]
         self._provider_map = {name: fn for name, fn in self.providers}
 

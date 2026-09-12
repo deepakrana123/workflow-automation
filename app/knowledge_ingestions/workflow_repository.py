@@ -268,33 +268,75 @@ class WorkflowRepository:
         action_name: str,
     ):
         """
-        Resolve an ActionDefinition for a given action name scoped to a workspace.
+        Resolve a runtime-ready ActionDefinition for a given action name
+        scoped to a workspace.
 
-        Looks up the action_definitions row whose name matches ``action_name``
-        via WorkflowActionMapping → WorkflowKnowledge (workspace filter).
+        Resolution order:
+          1. Query WorkflowActionMapping by action_name (snapshot column) +
+             workspace_id. This covers both:
+             - Mode A: row has matched_action_definition_id → join to
+               ActionDefinition to get its execution_template if the snapshot
+               has none.
+             - Mode B (workspace-local): matched_action_definition_id is NULL
+               but the snapshot columns (execution_template, input_schema, etc.)
+               are fully populated on the mapping row itself.
+          2. If the mapping row carries a complete execution_template in its
+             snapshot, build and return a synthetic ActionDefinition from the
+             snapshot so no additional DB round-trip is needed.
+          3. Fall through to the real ActionDefinition row (Mode A) when the
+             mapping snapshot has no execution_template of its own.
 
-        Returns the ActionDefinition ORM object, or None if not found.
-        This is the runtime resolution path replacing ActionConfiguration.
+        Returns an ActionDefinition-compatible object, or None if not found.
         """
         from app.models.action_definitions import ActionDefinition
 
-        return (
-            self.db.query(ActionDefinition)
-            .join(
-                WorkflowActionMapping,
-                WorkflowActionMapping.matched_action_definition_id == ActionDefinition.id,
-            )
+        mapping = (
+            self.db.query(WorkflowActionMapping)
             .join(
                 WorkflowKnowledge,
                 WorkflowKnowledge.id == WorkflowActionMapping.workflow_knowledge_id,
             )
             .filter(
                 WorkflowKnowledge.workspace_id == workspace_id,
-                ActionDefinition.name == action_name,
-                ActionDefinition.active.is_(True),
+                WorkflowActionMapping.action_name == action_name,
+                WorkflowActionMapping.status == MappingStatus.MAPPED,
             )
             .first()
         )
+
+        if mapping is None:
+            return None
+
+        # If the mapping snapshot has an execution_template, synthesize an
+        # ActionDefinition from the snapshot — avoids another DB query and
+        # correctly handles Mode B workspace-local actions.
+        if mapping.execution_template:
+            synthetic = ActionDefinition()
+            synthetic.id                = mapping.matched_action_definition_id or 0
+            synthetic.name              = mapping.action_name
+            synthetic.display_name      = mapping.display_name or mapping.action_name
+            synthetic.description       = mapping.catalog_description
+            synthetic.workflow_type     = mapping.workflow_type or "finance"
+            synthetic.aliases           = mapping.aliases or []
+            synthetic.input_schema      = mapping.input_schema
+            synthetic.output_schema     = mapping.output_schema
+            synthetic.execution_template = mapping.execution_template
+            synthetic.active            = True
+            return synthetic
+
+        # Mode A fallback: mapping points to a real ActionDefinition whose
+        # execution_template lives on the catalog row.
+        if mapping.matched_action_definition_id is not None:
+            return (
+                self.db.query(ActionDefinition)
+                .filter(
+                    ActionDefinition.id == mapping.matched_action_definition_id,
+                    ActionDefinition.active.is_(True),
+                )
+                .first()
+            )
+
+        return None
 
     # def search_actions_by_postgress(self, query: str, limit: int = 20):
     #     vector = func.to_tsvector(

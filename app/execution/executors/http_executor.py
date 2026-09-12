@@ -1,20 +1,36 @@
 """
 app/execution/executors/http_executor.py
 
-Executes external HTTP endpoints via WorkspaceIntegration.
+Executes external HTTP endpoints.
 
-Flow:
-    ActionDefinition.execution_template
-        ↓  workspace_integration_id (from template or future WorkflowActionMapping override)
-    WorkspaceIntegration  (base_url, authentication_type, credentials)
-        ↓
-    Build full URL  (base_url + configuration["endpoint"])
-        ↓
-    Apply auth headers
-        ↓
-    HTTP request  (method, headers, body_template rendered with context)
-        ↓
-    Map response via response_mapping  →  ActionResult
+The full connection config lives in execution_template.configuration on the
+ActionDefinition (or its WorkflowActionMapping snapshot for workspace-scoped
+actions). No WorkspaceIntegration table lookup needed.
+
+Expected execution_template shape:
+{
+  "execution_type": "http",
+  "configuration": {
+    "base_url":   "https://api.example.com",   ← optional, overrides workspace default
+    "method":     "POST",
+    "endpoint":   "/receive-loan-application",
+    "timeout":    30,
+    "headers":    {"X-Api-Key": "secret"},
+    "body_template": {
+      "entity_id":   "{{entity_id}}",
+      "action":      "receive_loan_application",
+      "workflow_id": "{{workflow_id}}"
+    },
+    "response_mapping": {
+      "status":    "$.status",
+      "reference": "$.reference_id",
+      "message":   "$.message"
+    }
+  }
+}
+
+body_template values wrapped in {{}} are interpolated from the step context.
+response_mapping maps output keys to dot-path locations in the JSON response.
 """
 
 import re
@@ -26,9 +42,8 @@ from app.models.action_definitions import ActionDefinition
 from app.workflow_execution.schemas.action_result import ActionResult
 from app.core.logger import logger
 
-
-# Default timeout used when not specified in execution_template
 _DEFAULT_TIMEOUT = 30
+_DEFAULT_METHOD  = "POST"
 
 
 class HttpExecutor(BaseExecutor):
@@ -39,46 +54,45 @@ class HttpExecutor(BaseExecutor):
         context: dict,
     ) -> ActionResult:
         template = action_definition.execution_template or {}
-        cfg = template.get("configuration") or {}
-
-        # workspace_integration is expected to be eager-loaded or accessible
-        # via action_definition. For now resolve from context if passed.
-        integration = context.get("_workspace_integration")
-
-        if integration is None:
-            return ActionResult(
-                success=False,
-                error=(
-                    f"http_executor: no workspace_integration available "
-                    f"for action '{action_definition.name}'"
-                ),
-                metadata={"skip_retry": True},
-            )
+        cfg      = template.get("configuration") or {}
 
         # ── Build URL ─────────────────────────────────────────────────────────
-        endpoint = cfg.get("endpoint", "")
-        url = integration.base_url.rstrip("/") + "/" + endpoint.lstrip("/")
+        # base_url resolution order:
+        #   1. execution_template.configuration.base_url — only if it is set
+        #      AND does not point at localhost (localhost values in the DB are
+        #      seed artefacts and must not override the running service URL).
+        #   2. DEFAULT_HTTP_BASE_URL env var — set to http://api:8000/api in
+        #      Docker, or http://localhost:8000/api for plain local runs.
+        from app.core.config import DEFAULT_HTTP_BASE_URL
+
+        _raw = (cfg.get("base_url") or "").rstrip("/")
+        _is_localhost = "localhost" in _raw or "127.0.0.1" in _raw
+        base_url = (_raw if _raw and not _is_localhost else None) or DEFAULT_HTTP_BASE_URL
+
+        endpoint = cfg.get("endpoint", "").lstrip("/")
+        url = f"{base_url}/{endpoint}" if endpoint else base_url
 
         # ── Build headers ─────────────────────────────────────────────────────
-        headers = dict(cfg.get("headers", {}))
-        headers = {**headers, **self._auth_headers(integration)}
+        headers = dict(cfg.get("headers") or {})
+        headers.setdefault("Content-Type", "application/json")
 
         # ── Render body template ──────────────────────────────────────────────
-        body_template = cfg.get("body_template", {})
+        body_template = cfg.get("body_template") or {}
         body = self._render_template(body_template, context)
 
         # ── Query params ──────────────────────────────────────────────────────
-        query_params = cfg.get("query_params", {})
+        query_params = cfg.get("query_params") or {}
 
-        method  = cfg.get("method", "POST").upper()
+        method  = cfg.get("method", _DEFAULT_METHOD).upper()
         timeout = cfg.get("timeout", _DEFAULT_TIMEOUT)
 
         logger.info(
             "http_executor_request",
             extra={"extra_data": {
-                "method": method,
-                "url": url,
+                "method":               method,
+                "url":                  url,
                 "action_definition_id": action_definition.id,
+                "action_name":          action_definition.name,
             }},
         )
 
@@ -115,8 +129,8 @@ class HttpExecutor(BaseExecutor):
             "http_executor_response",
             extra={"extra_data": {
                 "status_code": response.status_code,
-                "url": url,
-                "success": success,
+                "url":         url,
+                "success":     success,
             }},
         )
 
@@ -127,7 +141,7 @@ class HttpExecutor(BaseExecutor):
             response_body = {"raw": response.text}
 
         # ── Map response to outputs ───────────────────────────────────────────
-        response_mapping = cfg.get("response_mapping", {})
+        response_mapping = cfg.get("response_mapping") or {}
         outputs = self._map_response(response_body, response_mapping)
 
         if not success:
@@ -145,34 +159,8 @@ class HttpExecutor(BaseExecutor):
     # ── Private helpers ───────────────────────────────────────────────────────
 
     @staticmethod
-    def _auth_headers(integration) -> dict:
-        auth_type = integration.authentication_type
-        creds     = integration.credentials or {}
-
-        if auth_type == "bearer":
-            token = creds.get("token", "")
-            return {"Authorization": f"Bearer {token}"}
-
-        if auth_type == "api_key":
-            header = creds.get("header", "X-API-Key")
-            key    = creds.get("key", "")
-            return {header: key}
-
-        if auth_type == "basic":
-            import base64
-            user     = creds.get("username", "")
-            password = creds.get("password", "")
-            encoded  = base64.b64encode(f"{user}:{password}".encode()).decode()
-            return {"Authorization": f"Basic {encoded}"}
-
-        if auth_type == "oauth2":
-            token = creds.get("access_token", "")
-            return {"Authorization": f"Bearer {token}"}
-
-        return {}
-
-    @staticmethod
     def _render_template(template: dict, context: dict) -> dict:
+        """Interpolate {{variable}} placeholders in template values from context."""
         result = {}
         for key, value in template.items():
             if isinstance(value, str):
@@ -186,12 +174,13 @@ class HttpExecutor(BaseExecutor):
 
     @staticmethod
     def _map_response(response_body: dict, mapping: dict) -> dict:
+        """Map response JSON fields to output keys using dot-path expressions."""
         if not mapping:
             return response_body
 
         outputs = {}
         for output_key, source_key in mapping.items():
-            path = source_key.lstrip("$").lstrip(".")
+            path  = source_key.lstrip("$").lstrip(".")
             parts = path.split(".")
             value = response_body
             for part in parts:

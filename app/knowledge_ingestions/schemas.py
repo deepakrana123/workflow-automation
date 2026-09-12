@@ -1,14 +1,13 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Any
 
 
 class TriggerExtraction(BaseModel):
     """Business event that starts a workflow."""
 
     name: str = Field(..., description="Name of the trigger.")
-    description: str = Field(..., description="Brief explanation of what starts the workflow.")
+    description: str = Field(default="", description="Brief explanation of what starts the workflow.")
 
-    # Rules from the BRD that specifically apply to this trigger.
-    # Only include rules that are explicitly tied to this trigger event.
     applicable_rules: list[str] = Field(
         default_factory=list,
         description=(
@@ -18,7 +17,6 @@ class TriggerExtraction(BaseModel):
         ),
     )
 
-    # Actors responsible for or involved in this trigger event.
     responsible_actors: list[str] = Field(
         default_factory=list,
         description=(
@@ -33,21 +31,16 @@ class ActionReference(BaseModel):
     """Business action referenced in the BRD."""
 
     name: str = Field(..., description="Business action name.")
-    description: str = Field(..., description="What this action is expected to do.")
+    description: str = Field(default="", description="What this action is expected to do.")
 
-    # Rules from the BRD that specifically apply to this action.
-    # Only include rules that are explicitly tied to this action — not all workspace rules.
     applicable_rules: list[str] = Field(
         default_factory=list,
         description=(
             "Business rules from the document that specifically apply to this action. "
-            "For example: 'Manual approval required above ₹5L' belongs to the approval action, "
-            "not to every action. Only include rules explicitly tied to this action. "
             "Leave empty if no rules are directly associated."
         ),
     )
 
-    # Actors responsible for executing or approving this action.
     responsible_actors: list[str] = Field(
         default_factory=list,
         description=(
@@ -64,7 +57,7 @@ class BusinessRule(BaseModel):
     rule: str = Field(..., description="Business rule statement.")
 
 
-# Backward-compatible alias — remove once all callers use BusinessRule
+# Backward-compatible alias
 BussinessRule = BusinessRule
 
 
@@ -93,3 +86,60 @@ class WorkflowExtraction(BaseModel):
     actors: list[Actor] = Field(default_factory=list)
     external_systems: list[ExternalSystem] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_shapes(cls, data: Any) -> Any:
+        """
+        Coerce LLM output variations into the expected shapes before
+        field-level validation runs. Models sometimes return:
+
+          business_rules: ["rule text", ...]            → wrap as {"rule": "..."}
+          business_rules: [{"rule": "..."}, ...]        → pass through unchanged
+
+          action_references: [{"name": "..."}, ...]     → add description="" if missing
+          triggers:          [{"name": "..."}, ...]     → add description="" if missing
+
+          actors: ["Actor Name", ...]                   → wrap as {"name": "..."}
+          actors: [{"name": "..."}, ...]                → pass through unchanged
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # ── business_rules: plain strings → {"rule": str} ────────────────────
+        raw_rules = data.get("business_rules")
+        if isinstance(raw_rules, list):
+            coerced = []
+            for item in raw_rules:
+                if isinstance(item, str):
+                    coerced.append({"rule": item})
+                else:
+                    coerced.append(item)
+            data["business_rules"] = coerced
+
+        # ── action_references: ensure description exists ───────────────────────
+        raw_actions = data.get("action_references")
+        if isinstance(raw_actions, list):
+            for item in raw_actions:
+                if isinstance(item, dict) and "description" not in item:
+                    item["description"] = ""
+
+        # ── triggers: ensure description exists ──────────────────────────────
+        raw_triggers = data.get("triggers")
+        if isinstance(raw_triggers, list):
+            for item in raw_triggers:
+                if isinstance(item, dict) and "description" not in item:
+                    item["description"] = ""
+
+        # ── actors: plain strings → {"name": str} ────────────────────────────
+        raw_actors = data.get("actors")
+        if isinstance(raw_actors, list):
+            coerced = []
+            for item in raw_actors:
+                if isinstance(item, str):
+                    coerced.append({"name": item})
+                else:
+                    coerced.append(item)
+            data["actors"] = coerced
+
+        return data

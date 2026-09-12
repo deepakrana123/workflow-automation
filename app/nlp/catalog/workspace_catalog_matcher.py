@@ -242,9 +242,10 @@ class WorkspaceCatalogMatcher:
         workspace_id: int,
         user_request: str,
         selected_action_ids: list[int] | None = None,
+        brd_id: int | None = None,
     ) -> CatalogMatchResult:
-        action_mappings  = self._workspace_actions(workspace_id, user_request)
-        trigger_mappings = self._workspace_triggers(workspace_id, user_request)
+        action_mappings  = self._workspace_actions(workspace_id, user_request, brd_id)
+        trigger_mappings = self._workspace_triggers(workspace_id, user_request, brd_id)
 
         # selected_action_ids: explicit global overrides — still resolved via
         # WorkflowActionMapping so we get the snapshot, not ActionDefinition
@@ -258,10 +259,13 @@ class WorkspaceCatalogMatcher:
         self,
         workspace_id: int,
         user_request: str,
+        brd_id: int | None = None,
     ) -> list[WorkflowActionMapping]:
         """
         Full-text search over action snapshot columns scoped to the workspace.
 
+        When brd_id is provided, restricts to that single WorkflowKnowledge row
+        so generation is grounded in one BRD only.
         Falls back to all mapped workspace actions when FTS matches nothing.
         """
         base_q = (
@@ -276,6 +280,8 @@ class WorkspaceCatalogMatcher:
                 WorkflowActionMapping.action_name.isnot(None),
             )
         )
+        if brd_id is not None:
+            base_q = base_q.filter(WorkflowActionMapping.workflow_knowledge_id == brd_id)
 
         fts_results = self._fts_actions(base_q, user_request)
         if fts_results:
@@ -314,10 +320,12 @@ class WorkspaceCatalogMatcher:
         self,
         workspace_id: int,
         user_request: str,
+        brd_id: int | None = None,
     ) -> list[WorkflowTriggerMapping]:
         """
         Full-text search over trigger snapshot columns scoped to the workspace.
 
+        When brd_id is provided, restricts to that single WorkflowKnowledge row.
         Falls back to all mapped workspace triggers when FTS matches nothing.
         """
         base_q = (
@@ -332,6 +340,8 @@ class WorkspaceCatalogMatcher:
                 WorkflowTriggerMapping.trigger_name.isnot(None),
             )
         )
+        if brd_id is not None:
+            base_q = base_q.filter(WorkflowTriggerMapping.workflow_knowledge_id == brd_id)
 
         fts_results = self._fts_triggers(base_q, user_request)
         if fts_results:

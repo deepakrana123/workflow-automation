@@ -406,6 +406,14 @@ Use these concepts only when explicitly present in the document.
 
 20. For responsible_actors: only include actors explicitly mentioned for that action or trigger. Leave empty if none.
 
+21. **Extract EVERY action mentioned in the document.** A well-specified BRD contains 30 to 80 actions. Do not stop after finding a few. Read the entire document including all tables, eligibility matrices, verification steps, routing rules, notification events, exception handling flows, and audit requirements. Every distinct business operation is an action.
+
+22. **Extract EVERY business rule mentioned in the document.** Policy thresholds, score limits, FOIR slabs, age criteria, income minimums, SLA timelines, document expiry rules, and deduplication rules are all business rules. Extract each one explicitly — do not summarize multiple rules into one.
+
+23. **Tables and matrices contain the most rules.** Rows in approval matrices, eligibility tables, rejection code tables, and delegation of authority matrices each represent one or more rules. Extract each row as a separate rule.
+
+24. Do not truncate the action_references or business_rules lists. Include every item found.
+
 ---
 
 # FEW-SHOT EXAMPLES

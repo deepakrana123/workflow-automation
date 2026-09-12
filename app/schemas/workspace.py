@@ -20,16 +20,11 @@ class WorkspaceCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_hierarchy(self) -> "WorkspaceCreate":
-        """Enforce parent_id requirements based on level."""
-        if self.level == "global":
-            if self.parent_id is not None:
-                raise ValueError("A global workspace must not have a parent_id.")
-        else:
-            if self.parent_id is None:
-                raise ValueError(
-                    f"A '{self.level}' workspace requires a parent_id. "
-                    f"Expected parent level: '{_PARENT_LEVEL[self.level]}'."
-                )
+        """
+        Hierarchy validation is relaxed for now — all workspaces default to
+        'branch' level and parent_id is optional. When multi-level rule
+        inheritance is needed in the future, this validator can be tightened.
+        """
         return self
 
 

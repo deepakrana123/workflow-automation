@@ -5,6 +5,7 @@ import {
   useGetWorkspaceOverviewQuery,
   useGetWorkspaceDocumentsQuery,
   useGetWorkspaceWorkflowsQuery,
+  useGetWorkspaceActionsQuery,
   useGetUnmappedActionsQuery,
   useGetActionSuggestionsQuery,
   useResolveUnmappedActionMutation,
@@ -14,6 +15,7 @@ import {
   useUploadBRDMutation,
   useGetWorkspaceBusinessRulesQuery,
   useGetWorkspaceDiagnosticsQuery,
+  useGenerateBRDWorkflowMutation,
 } from "@/store/api";
 import {
   FolderKanban, FileText, Upload, GitBranch, Sparkles,
@@ -70,6 +72,9 @@ const WorkspaceDetail = () => {
       {/* Documents */}
       <DocumentsSection wsId={wsId} />
 
+      {/* Actions across all BRDs */}
+      <ActionsSection wsId={wsId} />
+
       {/* Unmapped actions — only shown when there are some */}
       <UnmappedActionsSection wsId={wsId} />
 
@@ -92,11 +97,124 @@ const WorkspaceDetail = () => {
   );
 };
 
+// ── BRD document row with inline generate ────────────────────────────────────
+const BRDDocRow = ({ doc: d, wsId }: { doc: any; wsId: number }) => {
+  const [generating, setGenerating] = useState(false);
+  const [genName, setGenName] = useState("");
+  const [genRequest, setGenRequest] = useState("");
+  const [genDomain, setGenDomain] = useState("finance");
+  const [showForm, setShowForm] = useState(false);
+  const [genError, setGenError] = useState("");
+  const [generateBRD, { isLoading: isGenerating }] = useGenerateBRDWorkflowMutation();
+
+  const canGenerate = d.extraction_status === "extracted" && d.mapped_action_count > 0;
+
+  async function handleGenerate() {
+    if (!genName.trim() || !genRequest.trim()) return;
+    setGenError("");
+    try {
+      await generateBRD({
+        workspaceId: wsId,
+        brdId: d.workflow_knowledge_id,
+        name: genName.trim(),
+        user_request: genRequest.trim(),
+        domain: genDomain,
+      }).unwrap();
+      setShowForm(false);
+      setGenName("");
+      setGenRequest("");
+    } catch (err: any) {
+      setGenError(err?.data?.detail || "Generation failed");
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-100 bg-white overflow-hidden">
+      <div className="flex items-start gap-3 px-3 py-2.5">
+        <FileText size={13} className="text-gray-400 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">{d.name}</p>
+          {d.workflow_name && d.workflow_name !== d.name && (
+            <p className="text-xs text-gray-400 truncate">{d.workflow_name}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">
+            {d.extraction_status === "extracted"
+              ? `${d.mapped_action_count}/${d.action_count} actions mapped · ${d.trigger_count} triggers · ${d.business_rule_count} rules`
+              : "No content extracted yet"}
+          </p>
+        </div>
+        <MappingBadge status={d.mapping_status} />
+        {canGenerate && (
+          <button
+            onClick={() => setShowForm((s) => !s)}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors"
+          >
+            <Sparkles size={11} /> Generate
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div className="px-3 pb-3 pt-1 border-t border-gray-100 bg-gray-50/40 space-y-2">
+          <p className="text-xs text-gray-500">
+            Generate a workflow grounded only in <span className="font-medium">"{d.name}"</span>
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500">Workflow name</label>
+              <input
+                className="input text-xs mt-0.5 w-full"
+                placeholder="e.g. Loan Approval Flow"
+                value={genName}
+                onChange={(e) => setGenName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Domain</label>
+              <select className="input text-xs mt-0.5 w-full" value={genDomain} onChange={(e) => setGenDomain(e.target.value)}>
+                <option value="finance">finance</option>
+                <option value="health">health</option>
+                <option value="support">support</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">What should this workflow do?</label>
+            <textarea
+              className="input text-xs mt-0.5 w-full resize-none"
+              rows={2}
+              placeholder="e.g. Handle home loan disbursement with legal verification"
+              value={genRequest}
+              onChange={(e) => setGenRequest(e.target.value)}
+            />
+          </div>
+          {genError && <p className="text-xs text-red-500">{genError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || !genName.trim() || !genRequest.trim()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-40"
+            >
+              <Sparkles size={11} /> {isGenerating ? "Generating…" : "Generate workflow"}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setGenError(""); }}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-medium hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 const DocumentsSection = ({ wsId }: { wsId: number }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
-  const { data, isLoading, refetch } = useGetWorkspaceDocumentsQuery(wsId);
+  const { data, isLoading } = useGetWorkspaceDocumentsQuery(wsId);
   const [upload, { data: uploadResult, isLoading: uploading, error: uploadError }] = useUploadBRDMutation();
   const uploadErr = (uploadError as any)?.data?.detail || (uploadError ? "Upload failed" : "");
   const docs = data?.documents || [];
@@ -106,7 +224,7 @@ const DocumentsSection = ({ wsId }: { wsId: number }) => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
     fd.append("workspace_id", String(wsId));
-    upload(fd).then(() => { setFiles([]); refetch(); });
+    upload(fd).then(() => { setFiles([]); });
   }
 
   return (
@@ -141,30 +259,113 @@ const DocumentsSection = ({ wsId }: { wsId: number }) => {
       )}
       {uploadErr && <p className="text-xs text-red-500 mt-1.5">{uploadErr}</p>}
       {uploadResult && (
-        <p className="text-xs text-emerald-600 font-medium mt-1.5">
-          {uploadResult.succeeded}/{uploadResult.total} ingested successfully
-        </p>
+        <div className="mt-1.5 space-y-1">
+          <p className="text-xs text-emerald-600 font-medium">
+            {uploadResult.succeeded}/{uploadResult.total} ingested successfully
+          </p>
+          {(uploadResult.results || []).filter((r: any) => r.status === "failed").map((r: any, i: number) => (
+            <p key={i} className="text-xs text-amber-600">
+              <span className="font-medium">{r.filename}:</span> {r.error}
+            </p>
+          ))}
+        </div>
       )}
 
       {/* Doc list */}
       {!isLoading && docs.length > 0 && (
         <div className="mt-3 space-y-1.5">
           {docs.map((d: any) => (
-            <div key={d.workflow_knowledge_id}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-100 bg-white">
-              <FileText size={13} className="text-gray-400 shrink-0" />
-              <span className="text-sm font-medium text-gray-800 flex-1 truncate">{d.name}</span>
-              <MappingBadge status={d.mapping_status} />
-              <span className="text-xs text-gray-400 tabular-nums">
-                {d.mapped_action_count}/{d.action_count} actions
-              </span>
-            </div>
+            <BRDDocRow key={d.workflow_knowledge_id} doc={d} wsId={wsId} />
           ))}
         </div>
       )}
       {!isLoading && docs.length === 0 && (
         <p className="text-sm text-gray-400 mt-3">No BRDs uploaded yet.</p>
       )}
+    </Section>
+  );
+};
+
+// ── Actions across all BRDs ───────────────────────────────────────────────────
+const ActionsSection = ({ wsId }: { wsId: number }) => {
+  const { data, isLoading } = useGetWorkspaceActionsQuery(wsId);
+  const actions: any[] = data?.actions || [];
+  const unresolved: any[] = data?.unresolved_actions || [];
+
+  if (isLoading) return (
+    <Section title="Actions" icon={<Sparkles size={14} className="text-gray-500" />}>
+      <div className="h-12 rounded skeleton" />
+    </Section>
+  );
+
+  if (!actions.length && !unresolved.length) return (
+    <Section title="Actions" icon={<Sparkles size={14} className="text-gray-500" />}>
+      <p className="text-sm text-gray-400">No actions extracted yet.</p>
+    </Section>
+  );
+
+  return (
+    <Section
+      title={`Actions (${actions.length}${unresolved.length ? ` + ${unresolved.length} unresolved` : ""})`}
+      icon={<Sparkles size={14} className="text-gray-500" />}
+    >
+      <div className="space-y-1.5">
+        {actions.map((a: any) => (
+          <div key={a.canonical_id}
+            className="px-3 py-2.5 rounded-lg border border-gray-100 bg-white">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-800 flex-1 truncate">
+                {a.display_name || a.action}
+              </span>
+              <code className="text-xs text-gray-400 hidden sm:block">{a.action}</code>
+              {a.contributed_by > 1 && (
+                <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">
+                  {a.contributed_by} BRDs
+                </span>
+              )}
+            </div>
+            {/* Per-source summary: one line per contributing BRD */}
+            {(a.sources || []).length > 0 && (
+              <div className="mt-1.5 space-y-0.5">
+                {a.sources.map((s: any, i: number) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs text-gray-400">
+                    <FileText size={10} className="shrink-0" />
+                    <span className="truncate">{s.source_document || "—"}</span>
+                    {s.term && s.term !== a.action && (
+                      <span className="italic truncate">"{s.term}"</span>
+                    )}
+                    {s.confidence != null && (
+                      <span className="ml-auto tabular-nums shrink-0">
+                        {(s.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Unresolved actions — extracted from BRDs but not matched to catalog */}
+        {unresolved.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <p className="text-xs text-amber-600 font-medium mb-1.5">
+              Unresolved ({unresolved.length}) — extracted but not matched to catalog
+            </p>
+            <div className="space-y-1">
+              {unresolved.map((u: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-100 bg-amber-50/30 text-xs">
+                  <AlertTriangle size={11} className="text-amber-400 shrink-0" />
+                  <span className="text-gray-700 flex-1 truncate">"{u.term}"</span>
+                  {u.source_document && (
+                    <span className="text-gray-400 truncate max-w-[160px]">{u.source_document}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </Section>
   );
 };

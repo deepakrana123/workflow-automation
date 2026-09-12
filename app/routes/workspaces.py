@@ -50,6 +50,12 @@ class GenerateWorkflowRequest(BaseModel):
     selected_action_ids: list[int] = []
 
 
+class GenerateBRDWorkflowRequest(BaseModel):
+    name: str
+    user_request: str
+    domain: str = "finance"
+
+
 @router.get("", response_model=list[WorkspaceResponse])
 def list_workspaces(active_only: bool = True, db: Session = Depends(get_db)):
     """List workspaces (active by default)."""
@@ -71,22 +77,15 @@ def create_workspace(body: WorkspaceCreate, db: Session = Depends(get_db)):
     """
     from app.models.workspace import WORKSPACE_LEVELS, _PARENT_LEVEL
 
-    # Validate parent exists and is the correct level (service-layer enforcement)
-    if body.level != "global" and body.parent_id is not None:
+    # Parent validation skipped for now — level defaults to branch,
+    # hierarchy enforcement will be added when multi-level rule inheritance
+    # is required.
+    if body.parent_id is not None:
         parent = db.query(Workspace).filter(Workspace.id == body.parent_id).first()
         if parent is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"Parent workspace {body.parent_id} not found.",
-            )
-        expected_parent_level = _PARENT_LEVEL[body.level]
-        if parent.level != expected_parent_level:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"A '{body.level}' workspace must have a '{expected_parent_level}' parent. "
-                    f"Workspace {body.parent_id} is '{parent.level}'."
-                ),
             )
 
     # Enforce single global workspace per deployment
@@ -249,6 +248,50 @@ def generate_workspace_workflow(
             user_request=body.user_request,
             domain=body.domain,
             selected_action_ids=body.selected_action_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError:
+        raise HTTPException(status_code=502, detail="LLM generation failed")
+
+
+@router.post("/{workspace_id}/brds/{brd_id}/generate")
+def generate_brd_workflow(
+    workspace_id: int,
+    brd_id: int,
+    body: GenerateBRDWorkflowRequest,
+    db: Session = Depends(get_db),
+):
+    """Generate a workflow grounded in a single BRD.
+
+    Restricts the candidate action/trigger set to the specified
+    workflow_knowledge_id (brd_id) only — actions from other BRDs in the
+    workspace are excluded. This produces a workflow that faithfully reflects
+    one BRD rather than a blend of all BRDs.
+
+    When the workspace has more than one BRD, call
+    POST /workspaces/{id}/synthesize afterward (or let the auto-merge run)
+    to combine per-BRD workflows into one end-to-end workflow.
+    """
+    _require_workspace(db, workspace_id)
+
+    # Verify the BRD exists and belongs to this workspace
+    from app.models.workflow_knowledge import WorkflowKnowledge
+    brd = db.query(WorkflowKnowledge).filter(
+        WorkflowKnowledge.id == brd_id,
+        WorkflowKnowledge.workspace_id == workspace_id,
+    ).first()
+    if brd is None:
+        raise HTTPException(status_code=404, detail="BRD not found in this workspace.")
+
+    try:
+        return nl_workflow_service.generate_workspace_workflow_service(
+            db=db,
+            workspace_id=workspace_id,
+            name=body.name,
+            user_request=body.user_request,
+            domain=body.domain,
+            brd_id=brd_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
