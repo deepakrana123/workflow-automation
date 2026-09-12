@@ -198,12 +198,17 @@ class MultiModalDocumentExtractor:
 
             try:
                 visual_result = future_visual.result()
+                failed_visual_pages: set[int] = set()
             except Exception as exc:
                 logger.warning(
                     "multimodal_extractor_visual_failed",
                     extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
                 )
-                # Fallback: use pypdf text for visual pages
+                # Fallback: use pypdf text for visual pages.
+                # Track which pages fell back so _merge_results can mark them
+                # clearly — otherwise the LLM cannot distinguish garbled pypdf
+                # text from a real Vision extraction.
+                failed_visual_pages = {p.page_number for p in all_visual_pages}
                 visual_result = {
                     p.page_number: p.text
                     for p in all_visual_pages
@@ -225,6 +230,7 @@ class MultiModalDocumentExtractor:
             body_text=text_result,
             visual_results=visual_result,
             appendix_text=appendix_result,
+            failed_visual_pages=failed_visual_pages,
         )
 
         if not merged.strip():
@@ -259,6 +265,7 @@ def _merge_results(
     body_text: str,
     visual_results: dict[int, str],
     appendix_text: str,
+    failed_visual_pages: set[int] | None = None,
 ) -> str:
     """
     Assemble the final merged document text.
@@ -278,7 +285,14 @@ def _merge_results(
     contains supplementary structured data extracted from visual content,
     and that APPENDIX contains supplementary rules and roles — both should
     be used alongside the BODY when extracting workflow knowledge.
+
+    failed_visual_pages:
+        Set of page numbers (0-indexed) for which VisionProvider failed and
+        pypdf text was used as fallback. Those pages are labelled with a
+        VISION_UNAVAILABLE suffix so the LLM and operators can distinguish
+        garbled pypdf text from genuine Vision extraction.
     """
+    _failed = failed_visual_pages or set()
     sections: list[str] = []
 
     # Body text
@@ -295,9 +309,14 @@ def _merge_results(
         for page in all_visual:
             extracted = visual_results.get(page.page_number, "").strip()
             if not extracted:
-                # Fallback to raw text if vision failed
+                # Fallback to raw text if vision failed for this specific page
                 extracted = page.text.strip() or "(no content extracted)"
-            label = "TABLE" if page.page_type == "table" else "DIAGRAM"
+            base_label = "TABLE" if page.page_type == "table" else "DIAGRAM"
+            # Mark pages where Vision failed so the LLM sees the degraded signal
+            if page.page_number in _failed:
+                label = f"{base_label} — VISION UNAVAILABLE, RAW TEXT"
+            else:
+                label = base_label
             visual_parts.append(
                 f"[Page {page.page_number + 1} — {label}]\n{extracted}"
             )

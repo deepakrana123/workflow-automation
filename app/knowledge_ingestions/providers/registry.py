@@ -48,7 +48,8 @@ _VISION_PROVIDERS: dict[str, Callable[[], VisionProvider]] = {
 }
 
 _TEXT_PROVIDERS: dict[str, Callable[[], TextProvider]] = {
-    "gemini": lambda: _import_gemini().GeminiTextProvider(),
+    "gemini":     lambda: _import_gemini().GeminiTextProvider(),
+    "openrouter": lambda: _import_openrouter().OpenRouterTextProvider(),
     # Future:
     # "openai":  lambda: _import_openai().OpenAITextProvider(),
     # "claude":  lambda: _import_claude().ClaudeTextProvider(),
@@ -113,3 +114,8 @@ def available_text_providers() -> list[str]:
 def _import_gemini():
     from app.knowledge_ingestions.providers import gemini as _gemini
     return _gemini
+
+
+def _import_openrouter():
+    from app.knowledge_ingestions.providers import openrouter as _openrouter
+    return _openrouter

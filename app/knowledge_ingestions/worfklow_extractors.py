@@ -1,165 +1,308 @@
+# from pydantic import ValidationError
+
+# from app.nlp.llm_manager.llm_manager import LLMManager
+# from app.nlp.llm_manager import provider_health as health
+# from app.knowledge_ingestions.schemas import WorkflowExtraction
+# from app.knowledge_ingestions.exceptions import WorkflowExtractionError
+# from app.core.logger import logger
+
+# from app.prompting import PromptManager, PromptContext, PromptKey
+
+
+# # ── Compact output example ────────────────────────────────────────────────────
+# # Passed to the LLM as {schema} instead of model_json_schema().
+# #
+# # Why: Pydantic's model_json_schema() emits a verbose $defs-heavy JSON Schema
+# # object. Smaller models (GPT-4o-mini, Llama) confuse it with the expected
+# # output and echo the schema back instead of filling it. A concrete filled
+# # example is unambiguous — the model sees exactly what shape to return.
+# #
+# # The example deliberately shows 7+ actions and 5+ rules to signal that
+# # exhaustive extraction is expected — not a brief summary.
+# _OUTPUT_EXAMPLE = """{
+#   "workflow_name": "Example Workflow",
+#   "summary": "Short summary based only on the source document.",
+#   "triggers": [
+#     {
+#       "name": "Example Trigger",
+#       "description": "Example description.",
+#       "applicable_rules": [],
+#       "responsible_actors": []
+#     }
+#   ],
+#   "action_references": [
+#     {
+#       "name": "Example Action",
+#       "description": "Example action description.",
+#       "applicable_rules": [],
+#       "responsible_actors": []
+#     }
+#   ],
+#   "business_rules": [
+#     {
+#       "rule": "Example business rule.",
+#       "condition": "Example condition.",
+#       "outcome": "Example outcome.",
+#       "responsible_role": "Example role.",
+#       "threshold": "Example threshold."
+#     }
+#   ],
+#   "actors": [
+#     {
+#       "name": "Example Actor",
+#       "role": "Example Role"
+#     }
+#   ],
+#   "external_systems": [
+#     {
+#       "name": "Example External System",
+#       "description": "Example business purpose."
+#     }
+#   ],
+#   "assumptions": [
+#     "Example assumption explicitly marked as an assumption."
+#   ]
+# }
+# IMPORTANT:
+# This JSON is a STRUCTURAL EXAMPLE ONLY.
+
+# All names, descriptions, rules, thresholds, actors, systems,
+# and values in the example are fictional.
+
+# DO NOT copy or reuse any value from this example.
+# DO NOT infer business facts from this example.
+
+# The source BRD is the ONLY authority for extracted content.
+# """
+
+
+# class WorkflowExtractor:
+#     def __init__(self):
+#         self.prompt_manager = PromptManager()
+#         self._llm = LLMManager()
+
+#     def extract(self, document_text: str) -> WorkflowExtraction:
+#         if not document_text.strip():
+#             raise WorkflowExtractionError("Document text is empty.")
+
+#         prompt = self.prompt_manager.build(
+#             PromptKey.WORKFLOW_EXTRACTION,
+#             PromptContext(
+#                 variables={
+#                     "schema": _OUTPUT_EXAMPLE,
+#                     "text": document_text,
+#                 }
+#             ),
+#         )
+
+#         # Provider selection for BRD extraction:
+#         #
+#         #   1. Gemini — preferred: large context window, 90s timeout, best at
+#         #      exhaustive multi-item extraction. Skipped if currently unhealthy
+#         #      (i.e. recently returned 429 or other http_error).
+#         #
+#         #   2. OpenRouter — first fallback: GPT-4o-mini via OpenRouter, reliable
+#         #      and fast. Used whenever Gemini is rate-limited or down.
+#         #
+#         #   3. Standard waterfall — last resort: tries the remaining providers
+#         #      in LLMManager order (openai, ollama).
+#         #
+#         # We check health before attempting Gemini to avoid a wasted 429 round-trip.
+
+#         result = None
+
+#         # ── Attempt 1: Gemini (if healthy) ───────────────────────────────────
+#         if health.is_healthy("gemini"):
+#             try:
+#                 result = self._llm.generate_with_provider(prompt, "gemini")
+#                 if not result.get("success"):
+#                     logger.warning(
+#                         "workflow_extractor_gemini_failed",
+#                         extra={"extra_data": {
+#                             "error_type": result.get("error_type"),
+#                             "error":      result.get("error", "")[:120],
+#                         }},
+#                     )
+#                     result = None
+#             except Exception as exc:
+#                 logger.warning(
+#                     "workflow_extractor_gemini_exception",
+#                     extra={"extra_data": {"error": str(exc)[:120]}},
+#                 )
+#                 result = None
+#         else:
+#             logger.info(
+#                 "workflow_extractor_gemini_skipped_unhealthy",
+#                 extra={"extra_data": {
+#                     "cooldown": health.get_all_status().get("gemini", {}).get(
+#                         "cooldown_remaining_seconds", 0
+#                     )
+#                 }},
+#             )
+
+#         # ── Attempt 2: OpenRouter (if Gemini failed/skipped) ─────────────────
+#         if result is None and health.is_healthy("openrouter"):
+#             try:
+#                 result = self._llm.generate_with_provider(prompt, "openrouter")
+#                 if not result.get("success"):
+#                     logger.warning(
+#                         "workflow_extractor_openrouter_failed",
+#                         extra={"extra_data": {
+#                             "error_type": result.get("error_type"),
+#                             "error":      result.get("error", "")[:120],
+#                         }},
+#                     )
+#                     result = None
+#             except Exception as exc:
+#                 logger.warning(
+#                     "workflow_extractor_openrouter_exception",
+#                     extra={"extra_data": {"error": str(exc)[:120]}},
+#                 )
+#                 result = None
+
+#         # ── Attempt 3: remaining waterfall ───────────────────────────────────
+#         if result is None:
+#             result = self._llm.generate(prompt)
+
+#         if not result["success"]:
+#             raise WorkflowExtractionError(result.get("error", "LLM call failed"))
+
+#         try:
+#             extraction = WorkflowExtraction.model_validate_json(result["output"])
+#             logger.info(
+#                 "workflow_extraction_complete",
+#                 extra={"extra_data": {
+#                     "provider":           result.get("provider"),
+#                     "actions_extracted":  len(extraction.action_references),
+#                     "rules_extracted":    len(extraction.business_rules),
+#                     "triggers_extracted": len(extraction.triggers),
+#                     "workflow_name":      extraction.workflow_name,
+#                 }},
+#             )
+#             return extraction
+
+#         except ValidationError as e:
+#             raise WorkflowExtractionError(
+#                 f"Invalid workflow extraction: {e}"
+#             ) from e
+
+
+
+from pathlib import Path
+
 from pydantic import ValidationError
 
 from app.nlp.llm_manager.llm_manager import LLMManager
+from app.nlp.llm_manager import provider_health as health
 from app.knowledge_ingestions.schemas import WorkflowExtraction
 from app.knowledge_ingestions.exceptions import WorkflowExtractionError
 from app.core.logger import logger
-
 from app.prompting import PromptManager, PromptContext, PromptKey
 
 
-# ── Compact output example ────────────────────────────────────────────────────
+# ── Compact structural output example ────────────────────────────────────────
+#
 # Passed to the LLM as {schema} instead of model_json_schema().
 #
-# Why: Pydantic's model_json_schema() emits a verbose $defs-heavy JSON Schema
-# object. Smaller models (GPT-4o-mini, Llama) confuse it with the expected
-# output and echo the schema back instead of filling it. A concrete filled
-# example is unambiguous — the model sees exactly what shape to return.
+# IMPORTANT:
+# This is only a structural example.
+# It must never provide real business facts to the model.
 #
-# The example deliberately shows 7+ actions and 5+ rules to signal that
-# exhaustive extraction is expected — not a brief summary.
+
 _OUTPUT_EXAMPLE = """{
-  "workflow_name": "Retail Loan Sourcing and Evaluation",
-  "summary": "End-to-end workflow for capturing, validating, evaluating, and routing retail loan applications across digital and branch channels prior to underwriting handoff.",
+  "workflow_name": "Example Workflow",
+  "summary": "Short summary based only on the source document.",
   "triggers": [
     {
-      "name": "Customer submits loan application",
-      "description": "Customer submits a retail loan application via digital portal, branch, or DSA channel.",
-      "applicable_rules": ["Mandatory fields must be complete before LRN is created"],
-      "responsible_actors": ["Customer (initiator)"]
-    },
-    {
-      "name": "Valid customer consent received",
-      "description": "Customer provides OTP-based consent for bureau pull and Aadhaar e-KYC.",
-      "applicable_rules": ["Bureau pull requires explicit timestamped OTP consent"],
-      "responsible_actors": ["Customer (initiator)"]
+      "name": "Example Trigger",
+      "description": "Example description.",
+      "applicable_rules": [],
+      "responsible_actors": []
     }
   ],
   "action_references": [
     {
-      "name": "Create Lead Reference Number",
-      "description": "Generate unique Lead Reference Number as soon as initial customer contact is initiated.",
-      "applicable_rules": ["LRN must be created before eligibility evaluation begins"],
-      "responsible_actors": []
-    },
-    {
-      "name": "Validate Mandatory Fields",
-      "description": "Check that all mandatory fields are present and block lead progression if any are missing.",
-      "applicable_rules": ["Hard stop if Name, Mobile, PAN, Pincode, Product, Amount, or Consent are missing"],
-      "responsible_actors": ["Sales Executive (initiator)"]
-    },
-    {
-      "name": "Verify PAN",
-      "description": "Validate PAN status and name match against NSDL database in real time.",
-      "applicable_rules": [
-        "PAN status must be EXISTING AND VALID",
-        "Name must match customer entry within 85% fuzzy match threshold",
-        "Lead must be halted if PAN is marked Inoperative"
-      ],
-      "responsible_actors": []
-    },
-    {
-      "name": "Perform Aadhaar e-KYC",
-      "description": "Execute OTP-based or offline XML Aadhaar verification to retrieve demographic data.",
-      "applicable_rules": ["Switch to biometric or OKYC after 3 failed OTP attempts"],
-      "responsible_actors": []
-    },
-    {
-      "name": "Execute Deduplication Check",
-      "description": "Check incoming lead against existing records using PAN, Mobile Number, Aadhaar Hash, and Bank Account Number.",
-      "applicable_rules": [
-        "Reject new lead if matching PAN or Aadhaar is in active pending sanction",
-        "Block lead under cooling-off period if rejection was within past 90 days"
-      ],
-      "responsible_actors": []
-    },
-    {
-      "name": "Trigger Credit Bureau Pull",
-      "description": "Initiate automated credit bureau enquiry and parse score and history from the response.",
-      "applicable_rules": [
-        "Bureau pull requires valid customer consent",
-        "Minimum bureau score of 675 required for PL and BL",
-        "Score below 675 results in automated immediate rejection",
-        "Borderline score 675 to 719 requires Senior Credit Officer review"
-      ],
-      "responsible_actors": ["Credit Officer (reviewer)"]
-    },
-    {
-      "name": "Calculate FOIR",
-      "description": "Compute Fixed Obligation to Income Ratio based on existing EMIs and proposed loan EMI against verified net monthly income.",
-      "applicable_rules": [
-        "Maximum permissible FOIR is 45% for income slab 20000 to 35000",
-        "Maximum permissible FOIR is 55% for income slab 35001 to 75000",
-        "Maximum permissible FOIR is 65% for income above 75000",
-        "FOIR exceeding hard threshold results in automatic rejection REJ-FOIR-03"
-      ],
-      "responsible_actors": []
-    },
-    {
-      "name": "Classify Lead",
-      "description": "Assign lead to one of five categories: STP, Non-STP, Needs Additional Information, Manual Review, or Hard Reject.",
-      "applicable_rules": [
-        "STP requires credit score above 720, FOIR within limit, digital KYC verified, zero document defects"
-      ],
-      "responsible_actors": ["Sourcing Operations (classifier)"]
-    },
-    {
-      "name": "Route Lead to Fulfillment Queue",
-      "description": "Assign eligible lead to appropriate branch and RM based on pincode mapping and workload.",
-      "applicable_rules": [
-        "Maximum 25 active leads per RM at any time",
-        "Personal Loans above 1000000 or Business Loans above 2500000 tagged Priority 1 High Value"
-      ],
-      "responsible_actors": ["Sales Executive (assignee)"]
-    },
-    {
-      "name": "Generate Rejection Notice",
-      "description": "Produce standardized rejection code and customer-facing communication for every rejected lead.",
-      "applicable_rules": ["Every rejected lead must carry a standardized rejection code"],
+      "name": "Example Action",
+      "description": "Example action description.",
+      "applicable_rules": [],
       "responsible_actors": []
     }
   ],
   "business_rules": [
-    {"rule": "Minimum bureau score of 675 required for Personal Loan and Business Loan approval."},
-    {"rule": "Hard rejection for bureau score below 675. No manual overrides except ETB customers with 24 months spotless repayment."},
-    {"rule": "Zero instances of DPD greater than 30 days allowed in the past 6 months."},
-    {"rule": "FOIR hard rejection thresholds: above 50% for income 20000-35000, above 60% for 35001-75000, above 70% for above 75000."},
-    {"rule": "Sourcing restricted to active pincodes within 35 km radius for unsecured loans and 50 km for secured loans."},
-    {"rule": "Leads generated outside active pincodes must be tagged Rejected Non-Serviced Location."},
-    {"rule": "Cooling-off period of 90 calendar days applies after any application rejection."},
-    {"rule": "Maximum 3 unsecured loan inquiries permitted in the past 30 days before flagging as Credit Hungry."},
-    {"rule": "DSA code must be active and verified before lead submission is accepted."},
-    {"rule": "Digital channel takes precedence over DSA for the same customer within 7 days."}
+    {
+      "rule": "Example business rule.",
+      "condition": "Example condition.",
+      "outcome": "Example outcome.",
+      "responsible_role": "Example role.",
+      "threshold": "Example threshold."
+    }
   ],
   "actors": [
-    {"name": "Customer", "role": "Applicant"},
-    {"name": "Sales Executive", "role": "Relationship Manager"},
-    {"name": "Sourcing Operations", "role": "Central Operations"},
-    {"name": "Credit Officer", "role": "Underwriter"},
-    {"name": "Compliance Officer", "role": "Legal and Regulatory"},
-    {"name": "DSA", "role": "Channel Partner"}
+    {
+      "name": "Example Actor",
+      "role": "Example Role"
+    }
   ],
   "external_systems": [
-    {"name": "NSDL", "description": "PAN verification authority."},
-    {"name": "UIDAI", "description": "Aadhaar e-KYC provider."},
-    {"name": "CIBIL", "description": "Primary credit bureau for score and history."},
-    {"name": "CKYC Registry", "description": "Centralized KYC repository fallback when Aadhaar is unavailable."}
+    {
+      "name": "Example External System",
+      "description": "Example business purpose."
+    }
   ],
   "assumptions": [
-    "Customer has consented to bureau pull and Aadhaar verification before processing begins.",
-    "All pincodes are pre-mapped to branches in the master geography database."
+    "Example assumption explicitly marked as an assumption."
   ]
-}"""
+}
+
+IMPORTANT:
+
+This JSON is a STRUCTURAL EXAMPLE ONLY.
+
+All names, descriptions, rules, thresholds, actors, systems,
+and values in the example are fictional.
+
+DO NOT copy or reuse any value from this example.
+DO NOT infer business facts from this example.
+
+The source BRD is the ONLY authority for extracted content.
+"""
+
+
+# ── Debug output directory ────────────────────────────────────────────────────
+#
+# Temporary observability artifacts.
+# These let us inspect exactly what reached the workflow LLM.
+#
+
+_DEBUG_DIR = Path("debug_workflow_extraction")
 
 
 class WorkflowExtractor:
+
     def __init__(self):
         self.prompt_manager = PromptManager()
         self._llm = LLMManager()
 
     def extract(self, document_text: str) -> WorkflowExtraction:
+
+        # ── Input validation ────────────────────────────────────────────────
+
         if not document_text.strip():
             raise WorkflowExtractionError("Document text is empty.")
+
+        document_text = document_text.strip()
+
+        logger.info(
+            "workflow_extractor_input",
+            extra={
+                "extra_data": {
+                    "input_chars": len(document_text),
+                    "input_lines": len(document_text.splitlines()),
+                }
+            },
+        )
+
+        # ── Build prompt ───────────────────────────────────────────────────
 
         prompt = self.prompt_manager.build(
             PromptKey.WORKFLOW_EXTRACTION,
@@ -171,36 +314,422 @@ class WorkflowExtractor:
             ),
         )
 
-        # BRD extraction requires a large-context, instruction-following model.
-        # Try Gemini first (real key, 90s timeout, large context window).
-        # Fall back to the standard waterfall if Gemini is unhealthy or fails.
+        logger.info(
+            "workflow_extractor_prompt_built",
+            extra={
+                "extra_data": {
+                    "document_chars": len(document_text),
+                    "prompt_chars": len(prompt),
+                }
+            },
+        )
+
+        # Save exact workflow input for debugging.
+        #
+        # IMPORTANT:
+        # This is intentionally saved to a local debug directory,
+        # not printed into application logs.
+        self._save_debug_input(prompt)
+
         result = None
-        try:
-            result = self._llm.generate_with_provider(prompt, "gemini")
-        except Exception:
-            pass
 
-        if result is None or not result.get("success"):
-            result = self._llm.generate(prompt)
+        # ── Attempt 1: Gemini ───────────────────────────────────────────────
+        #
+        # Gemini is preferred because of its larger context window and
+        # suitability for exhaustive document extraction.
+        #
 
-        if not result["success"]:
-            raise WorkflowExtractionError(result.get("error", "LLM call failed"))
+        if health.is_healthy("gemini"):
 
-        try:
-            extraction = WorkflowExtraction.model_validate_json(result["output"])
             logger.info(
-                "workflow_extraction_complete",
-                extra={"extra_data": {
-                    "provider":          result.get("provider"),
-                    "actions_extracted": len(extraction.action_references),
-                    "rules_extracted":   len(extraction.business_rules),
-                    "triggers_extracted": len(extraction.triggers),
-                    "workflow_name":     extraction.workflow_name,
-                }},
+                "workflow_extractor_provider_attempt",
+                extra={
+                    "extra_data": {
+                        "provider": "gemini",
+                        "prompt_chars": len(prompt),
+                    }
+                },
             )
-            return extraction
 
-        except ValidationError as e:
+            try:
+                result = self._llm.generate_with_provider(
+                    prompt,
+                    "gemini",
+                )
+
+                if result.get("success"):
+
+                    logger.info(
+                        "workflow_extractor_provider_success",
+                        extra={
+                            "extra_data": {
+                                "provider": "gemini",
+                                "output_chars": len(
+                                    result.get("output", "")
+                                ),
+                            }
+                        },
+                    )
+
+                else:
+
+                    logger.warning(
+                        "workflow_extractor_gemini_failed",
+                        extra={
+                            "extra_data": {
+                                "error_type": result.get("error_type"),
+                                "error": result.get("error", "")[:120],
+                            }
+                        },
+                    )
+
+                    result = None
+
+            except Exception as exc:
+
+                logger.warning(
+                    "workflow_extractor_gemini_exception",
+                    extra={
+                        "extra_data": {
+                            "error": str(exc)[:120],
+                        }
+                    },
+                )
+
+                result = None
+
+        else:
+
+            cooldown = (
+                health.get_all_status()
+                .get("gemini", {})
+                .get("cooldown_remaining_seconds", 0)
+            )
+
+            logger.info(
+                "workflow_extractor_gemini_skipped_unhealthy",
+                extra={
+                    "extra_data": {
+                        "cooldown_remaining_seconds": cooldown,
+                    }
+                },
+            )
+
+        # ── Attempt 2: OpenRouter ──────────────────────────────────────────
+
+        if result is None and health.is_healthy("openrouter"):
+
+            logger.info(
+                "workflow_extractor_provider_attempt",
+                extra={
+                    "extra_data": {
+                        "provider": "openrouter",
+                        "prompt_chars": len(prompt),
+                    }
+                },
+            )
+
+            try:
+
+                result = self._llm.generate_with_provider(
+                    prompt,
+                    "openrouter",
+                )
+
+                if result.get("success"):
+
+                    logger.info(
+                        "workflow_extractor_provider_success",
+                        extra={
+                            "extra_data": {
+                                "provider": "openrouter",
+                                "output_chars": len(
+                                    result.get("output", "")
+                                ),
+                            }
+                        },
+                    )
+
+                else:
+
+                    logger.warning(
+                        "workflow_extractor_openrouter_failed",
+                        extra={
+                            "extra_data": {
+                                "error_type": result.get("error_type"),
+                                "error": result.get("error", "")[:120],
+                            }
+                        },
+                    )
+
+                    result = None
+
+            except Exception as exc:
+
+                logger.warning(
+                    "workflow_extractor_openrouter_exception",
+                    extra={
+                        "extra_data": {
+                            "error": str(exc)[:120],
+                        }
+                    },
+                )
+
+                result = None
+
+        # ── Attempt 3: remaining LLM waterfall ─────────────────────────────
+
+        if result is None:
+
+            logger.info(
+                "workflow_extractor_provider_attempt",
+                extra={
+                    "extra_data": {
+                        "provider": "llm_manager_waterfall",
+                        "prompt_chars": len(prompt),
+                    }
+                },
+            )
+
+            try:
+
+                result = self._llm.generate(prompt)
+
+                if result.get("success"):
+
+                    logger.info(
+                        "workflow_extractor_provider_success",
+                        extra={
+                            "extra_data": {
+                                "provider": result.get("provider"),
+                                "output_chars": len(
+                                    result.get("output", "")
+                                ),
+                            }
+                        },
+                    )
+
+                else:
+
+                    logger.warning(
+                        "workflow_extractor_waterfall_failed",
+                        extra={
+                            "extra_data": {
+                                "provider": result.get("provider"),
+                                "error_type": result.get("error_type"),
+                                "error": result.get("error", "")[:120],
+                            }
+                        },
+                    )
+
+            except Exception as exc:
+
+                logger.exception(
+                    "workflow_extractor_waterfall_exception",
+                )
+
+                raise WorkflowExtractionError(
+                    f"LLM provider waterfall failed: {exc}"
+                ) from exc
+
+        # ── Final provider failure ─────────────────────────────────────────
+
+        if not result or not result.get("success"):
+
             raise WorkflowExtractionError(
-                f"Invalid workflow extraction: {e}"
-            ) from e
+                result.get("error", "LLM call failed")
+                if result
+                else "LLM call failed with no result."
+            )
+
+        raw_output = result.get("output", "")
+
+        logger.info(
+            "workflow_extractor_raw_output",
+            extra={
+                "extra_data": {
+                    "provider": result.get("provider"),
+                    "output_chars": len(raw_output),
+                }
+            },
+        )
+
+        # Save exact raw LLM output before Pydantic validation.
+        self._save_debug_output(raw_output)
+
+        # ── Parse + validate ───────────────────────────────────────────────
+
+        try:
+
+            extraction = WorkflowExtraction.model_validate_json(
+                raw_output
+            )
+
+        except ValidationError as exc:
+
+            logger.error(
+                "workflow_extractor_validation_failed",
+                extra={
+                    "extra_data": {
+                        "provider": result.get("provider"),
+                        "output_chars": len(raw_output),
+                        "validation_errors": len(exc.errors()),
+                    }
+                },
+            )
+
+            raise WorkflowExtractionError(
+                f"Invalid workflow extraction: {exc}"
+            ) from exc
+
+        # ── Final extraction metrics ───────────────────────────────────────
+
+        logger.info(
+            "workflow_extraction_complete",
+            extra={
+                "extra_data": {
+                    "provider": result.get("provider"),
+                    "input_chars": len(document_text),
+                    "prompt_chars": len(prompt),
+                    "output_chars": len(raw_output),
+                    "actions_extracted": len(
+                        extraction.action_references
+                    ),
+                    "rules_extracted": len(
+                        extraction.business_rules
+                    ),
+                    "triggers_extracted": len(
+                        extraction.triggers
+                    ),
+                    "actors_extracted": len(
+                        extraction.actors
+                    ),
+                    "external_systems_extracted": len(
+                        extraction.external_systems
+                    ),
+                    "assumptions_extracted": len(
+                        extraction.assumptions
+                    ),
+                    "workflow_name": extraction.workflow_name,
+                }
+            },
+        )
+
+        # Save normalized structured result as well.
+        self._save_debug_json(extraction)
+
+        return extraction
+
+    # ── Debug helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _ensure_debug_dir() -> None:
+        _DEBUG_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+    @classmethod
+    def _save_debug_input(cls, prompt: str) -> None:
+        try:
+
+            cls._ensure_debug_dir()
+
+            path = _DEBUG_DIR / "workflow_llm_input.txt"
+
+            path.write_text(
+                prompt,
+                encoding="utf-8",
+            )
+
+            logger.info(
+                "workflow_debug_input_saved",
+                extra={
+                    "extra_data": {
+                        "path": str(path),
+                        "chars": len(prompt),
+                    }
+                },
+            )
+
+        except Exception as exc:
+
+            # Debug artifact failure must NEVER break extraction.
+            logger.warning(
+                "workflow_debug_input_save_failed",
+                extra={
+                    "extra_data": {
+                        "error": str(exc)[:120],
+                    }
+                },
+            )
+
+    @classmethod
+    def _save_debug_output(cls, output: str) -> None:
+        try:
+
+            cls._ensure_debug_dir()
+
+            path = _DEBUG_DIR / "workflow_llm_output.txt"
+
+            path.write_text(
+                output,
+                encoding="utf-8",
+            )
+
+            logger.info(
+                "workflow_debug_output_saved",
+                extra={
+                    "extra_data": {
+                        "path": str(path),
+                        "chars": len(output),
+                    }
+                },
+            )
+
+        except Exception as exc:
+
+            logger.warning(
+                "workflow_debug_output_save_failed",
+                extra={
+                    "extra_data": {
+                        "error": str(exc)[:120],
+                    }
+                },
+            )
+
+    @classmethod
+    def _save_debug_json(
+        cls,
+        extraction: WorkflowExtraction,
+    ) -> None:
+        try:
+
+            cls._ensure_debug_dir()
+
+            path = _DEBUG_DIR / "workflow_extraction.json"
+
+            path.write_text(
+                extraction.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+
+            logger.info(
+                "workflow_debug_json_saved",
+                extra={
+                    "extra_data": {
+                        "path": str(path),
+                    }
+                },
+            )
+
+        except Exception as exc:
+
+            logger.warning(
+                "workflow_debug_json_save_failed",
+                extra={
+                    "extra_data": {
+                        "error": str(exc)[:120],
+                    }
+                },
+            )
