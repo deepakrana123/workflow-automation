@@ -334,10 +334,24 @@ class WorkflowExtraction(BaseModel):
         raw_rules = data.get("business_rules")
 
         if isinstance(raw_rules, list):
-            data["business_rules"] = [
-                {"rule": item} if isinstance(item, str) else item
-                for item in raw_rules
-            ]
+            normalised_rules = []
+            for item in raw_rules:
+                if isinstance(item, str):
+                    normalised_rules.append({"rule": item})
+                    continue
+                if isinstance(item, dict):
+                    # responsible_role:
+                    # Some models emit a list of roles
+                    # (e.g. ["System", "Sourcing Operations (Ops)"]) but the
+                    # field is typed str | None. Coerce a list to a
+                    # comma-separated string; an empty list becomes None.
+                    role = item.get("responsible_role")
+                    if isinstance(role, list):
+                        item["responsible_role"] = (
+                            ", ".join(str(r) for r in role) or None
+                        )
+                normalised_rules.append(item)
+            data["business_rules"] = normalised_rules
 
         # action_references:
         # Ensure optional description exists when omitted.

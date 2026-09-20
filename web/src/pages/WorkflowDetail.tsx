@@ -21,12 +21,12 @@ const WorkflowDetail = () => {
 
   return (
     <div className="animate-in space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">{workflow.name}</h1>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-gray-900 break-words">{workflow.name}</h1>
           <p className="text-sm text-gray-500 mt-0.5">Domain: {workflow.domain} · #{workflow.id}</p>
         </div>
-        <StatusBadge status={workflow.status || "active"} />
+        <div className="shrink-0"><StatusBadge status={workflow.status || "active"} /></div>
       </div>
 
       <div className="card p-5">

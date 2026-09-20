@@ -65,18 +65,18 @@ const Catalog = () => {
     <div className="animate-in space-y-5">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between">
+      <div className="page-header">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Catalog</h1>
           <p className="text-sm text-gray-500 mt-0.5">Triggers &amp; actions available for workflow generation</p>
         </div>
-        <div className="relative">
+        <div className="relative w-full sm:w-56">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search…"
-            className="input pl-9 w-56"
+            className="input pl-9 w-full"
           />
         </div>
       </div>
@@ -103,7 +103,8 @@ const Catalog = () => {
 
       {/* ── Table ── */}
       <div className="card overflow-hidden">
-        <table className="w-full">
+        <div className="table-wrap">
+        <table className="w-full min-w-[720px]">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50/50">
               <th className="th w-56">Name</th>
@@ -181,6 +182,7 @@ const Catalog = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ── Pagination ── */}

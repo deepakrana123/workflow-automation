@@ -51,6 +51,21 @@
     @apply bg-white border border-gray-200 rounded-xl;
   }
 
+  /* ──────── Layout helpers ──────── */
+  /* Responsive page container: tight padding on phones, roomier + wider on large screens */
+  .page-container {
+    @apply w-full mx-auto px-4 py-4 sm:px-6 sm:py-6
+           max-w-[1100px] xl:max-w-[1280px] 2xl:max-w-[1440px];
+  }
+  /* Page header: title block + actions. Wraps to its own row on extra-small. */
+  .page-header {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+  }
+  /* Wrap tables so they scroll horizontally instead of clipping on narrow screens */
+  .table-wrap {
+    @apply w-full overflow-x-auto scroll-thin;
+  }
+
   /* ──────── Input ──────── */
   .input {
     @apply w-full h-9 px-3 text-sm bg-white border border-gray-200 rounded-lg

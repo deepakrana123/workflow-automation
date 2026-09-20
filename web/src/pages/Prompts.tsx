@@ -16,7 +16,8 @@ const Prompts = () => {
       </div>
 
       <div className="card overflow-hidden">
-        <table className="w-full">
+        <div className="table-wrap">
+        <table className="w-full min-w-[640px]">
           <thead><tr className="border-b border-gray-100 bg-gray-50/50">
             <th className="th">Prompt</th><th className="th">Active</th><th className="th">Previous</th><th className="th">Available</th><th className="th">Actions</th>
           </tr></thead>
@@ -40,12 +41,14 @@ const Prompts = () => {
             {prompts.length === 0 && <tr><td colSpan={5} className="td text-center py-16 text-gray-400 text-sm">No prompts.</td></tr>}
           </tbody>
         </table>
+        </div>
       </div>
 
       {stats.length > 0 && <>
         <h2 className="text-sm font-semibold text-gray-900">Performance</h2>
         <div className="card overflow-hidden">
-          <table className="w-full">
+          <div className="table-wrap">
+          <table className="w-full min-w-[560px]">
             <thead><tr className="border-b border-gray-100 bg-gray-50/50">
               <th className="th">Version</th><th className="th">Total</th><th className="th">Pass Rate</th><th className="th">Avg Attempts</th><th className="th">Latency</th>
             </tr></thead>
@@ -61,6 +64,7 @@ const Prompts = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </>}
     </div>

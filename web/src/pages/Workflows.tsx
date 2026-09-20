@@ -20,7 +20,8 @@ const Workflows = () => {
       </div>
 
       <div className="card overflow-hidden">
-        <table className="w-full">
+        <div className="table-wrap">
+        <table className="w-full min-w-[560px]">
           <thead><tr className="border-b border-gray-100 bg-gray-50/50">
             <th className="th">Name</th><th className="th">Domain</th><th className="th">Status</th><th className="th">Created</th>
           </tr></thead>
@@ -46,6 +47,7 @@ const Workflows = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

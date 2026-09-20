@@ -67,11 +67,18 @@ class CrossEncoderReRanker:
 
     @staticmethod
     def _candidate_text(candidate: RankedCandidate) -> str:
-        """Build the document string shown to the cross-encoder."""
+        """Build the document string shown to the cross-encoder.
+
+        Includes the catalog description alongside the name, display name and
+        aliases. The description is the strongest natural-language signal for
+        matching a differently-phrased BRD action (e.g. "Validate PAN Details")
+        to its catalog entry ("verify_pan"); omitting it starved the reranker
+        and collapsed confidence for correct-but-reworded pairs.
+        """
         name = getattr(candidate.entity, "name", "") or ""
         desc = getattr(candidate.entity, "description", "") or ""
         display_name = getattr(candidate.entity, "display_name", "") or ""
         aliases = getattr(candidate.entity, "aliases", None) or []
 
         alias_text = " ".join(aliases)
-        return f"{name} {display_name} {alias_text}".strip()
+        return f"{display_name} {name} {alias_text} {desc}".strip()

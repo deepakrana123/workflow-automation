@@ -58,7 +58,7 @@ export default function RuntimeWorkflows() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="page-header">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Runtime Workflows</h1>
           <p className="text-sm text-gray-500 mt-0.5">Workflows accessible to your role and workspace</p>

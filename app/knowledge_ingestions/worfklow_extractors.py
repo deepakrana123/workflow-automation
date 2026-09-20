@@ -197,6 +197,7 @@ from app.nlp.llm_manager import provider_health as health
 from app.knowledge_ingestions.schemas import WorkflowExtraction
 from app.knowledge_ingestions.exceptions import WorkflowExtractionError
 from app.core.logger import logger
+from app.core.config import BRD_EXTRACTION_OPENROUTER_MODEL
 from app.prompting import PromptManager, PromptContext, PromptKey
 
 
@@ -431,9 +432,15 @@ class WorkflowExtractor:
 
             try:
 
+                # BRD ingestion overrides the OpenRouter model for THIS call
+                # only (a capable model for large, dense BRDs) via the
+                # dedicated BRD_EXTRACTION_OPENROUTER_MODEL config. The shared
+                # OPENROUTER_MODEL — and the workflow-generation pipeline that
+                # relies on it — are left completely unchanged.
                 result = self._llm.generate_with_provider(
                     prompt,
                     "openrouter",
+                    model=BRD_EXTRACTION_OPENROUTER_MODEL,
                 )
 
                 if result.get("success"):
@@ -443,6 +450,7 @@ class WorkflowExtractor:
                         extra={
                             "extra_data": {
                                 "provider": "openrouter",
+                                "model": BRD_EXTRACTION_OPENROUTER_MODEL,
                                 "output_chars": len(
                                     result.get("output", "")
                                 ),

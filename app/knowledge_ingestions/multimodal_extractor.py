@@ -56,8 +56,17 @@ from app.knowledge_ingestions.page_classifier import (
     DocumentClassification,
     PageClassification,
 )
-from app.knowledge_ingestions.table_image_extractor import TableImageExtractor
+from app.knowledge_ingestions.table_image_extractor import (
+    TableImageExtractor,
+    PageExtractionResult,
+    ExtractionStatus,
+)
 from app.knowledge_ingestions.appendix_extractor import AppendixExtractor
+from app.knowledge_ingestions.page_metadata import build_page_metadata
+from app.knowledge_ingestions.continuation_detector import (
+    ContinuationDetector,
+    build_extraction_groups,
+)
 from app.knowledge_ingestions.providers.base import VisionProvider, TextProvider
 from app.knowledge_ingestions.providers.registry import (
     get_vision_provider,
@@ -90,6 +99,7 @@ class MultiModalDocumentExtractor:
         vision_provider: VisionProvider | None = None,
         text_provider:   TextProvider   | None = None,
         classifier:      PageClassifier | None = None,
+        continuation_detector: ContinuationDetector | None = None,
     ):
         # Resolve providers from registry if not injected.
         # Done at construction time so the registry is called once per
@@ -97,6 +107,7 @@ class MultiModalDocumentExtractor:
         self._vision_provider = vision_provider or get_vision_provider()
         self._text_provider   = text_provider   or get_text_provider()
         self._classifier      = classifier      or PageClassifier()
+        self._continuation_detector = continuation_detector or ContinuationDetector()
 
         self._table_image_extractor = TableImageExtractor(self._vision_provider)
         self._appendix_extractor    = AppendixExtractor(self._text_provider)
@@ -164,8 +175,15 @@ class MultiModalDocumentExtractor:
 
         # ── Step 2: Run three extraction paths in parallel ────────────────────
         text_result:    str = ""
-        visual_result:  dict[int, str] = {}
+        visual_result:  dict[int, PageExtractionResult] = {}
         appendix_result: str = ""
+
+        # Visual pages in document order — needed for the fallback path and by
+        # the merge step below.
+        all_visual_pages = sorted(
+            doc.table_pages + doc.image_pages,
+            key=lambda p: p.page_number,
+        )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             # Thread A — body text (already extracted during classification)
@@ -173,12 +191,11 @@ class MultiModalDocumentExtractor:
                 self._extract_body_text, doc
             )
 
-            # Thread B — table + image pages via VisionProvider
-            all_visual_pages = doc.table_pages + doc.image_pages
+            # Thread B — table + image pages via VisionProvider, grouped by
+            # continuation detection (independent groups may run concurrently,
+            # continuation groups stay ordered with compact context).
             future_visual = pool.submit(
-                self._table_image_extractor.extract_pages,
-                file_path,
-                all_visual_pages,
+                self._extract_visual, file_path, all_visual_pages
             )
 
             # Thread C — appendix pages via TextProvider
@@ -198,19 +215,21 @@ class MultiModalDocumentExtractor:
 
             try:
                 visual_result = future_visual.result()
-                failed_visual_pages: set[int] = set()
             except Exception as exc:
                 logger.warning(
                     "multimodal_extractor_visual_failed",
                     extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
                 )
-                # Fallback: use pypdf text for visual pages.
-                # Track which pages fell back so _merge_results can mark them
-                # clearly — otherwise the LLM cannot distinguish garbled pypdf
-                # text from a real Vision extraction.
-                failed_visual_pages = {p.page_number for p in all_visual_pages}
+                # Whole-thread failure — record every visual page as a provider
+                # failure (NOT empty) so the merge marks them clearly and the
+                # raw pypdf text is used as a degraded fallback.
                 visual_result = {
-                    p.page_number: p.text
+                    p.page_number: PageExtractionResult(
+                        page_number=p.page_number,
+                        status=ExtractionStatus.PROVIDER_FAILED,
+                        provider=self._vision_provider.provider_name,
+                        error_type="extractor_thread_failed",
+                    )
                     for p in all_visual_pages
                 }
 
@@ -230,7 +249,6 @@ class MultiModalDocumentExtractor:
             body_text=text_result,
             visual_results=visual_result,
             appendix_text=appendix_result,
-            failed_visual_pages=failed_visual_pages,
         )
 
         if not merged.strip():
@@ -257,42 +275,113 @@ class MultiModalDocumentExtractor:
         sorted_pages = sorted(doc.text_pages, key=lambda p: p.page_number)
         return "\n".join(p.text for p in sorted_pages if p.text.strip())
 
+    def _extract_visual(
+        self,
+        file_path: Path,
+        visual_pages: list[PageClassification],
+    ) -> dict[int, PageExtractionResult]:
+        """
+        Run continuation detection over the ordered visual pages, group them,
+        and extract each group via the group-aware extractor.
+
+        Returns {page_number: PageExtractionResult}. Ordering is not relied on
+        here — the merge step reconstructs document order by page_number.
+        """
+        if not visual_pages:
+            return {}
+
+        # Cheap, text-only metadata for every visual page (no rendering/LLM).
+        metas = [build_page_metadata(p) for p in visual_pages]
+        page_lookup = {p.page_number: p for p in visual_pages}
+
+        logger.info(
+            "continuation_detection_started",
+            extra={"extra_data": {
+                "pdf": file_path.name,
+                "visual_pages": [m.page_number for m in metas],
+            }},
+        )
+
+        # Observability: log the pairwise decision for each adjacent visual pair.
+        for prev_meta, curr_meta in zip(metas, metas[1:]):
+            adjacent = curr_meta.page_number == prev_meta.page_number + 1
+            if adjacent:
+                result = self._continuation_detector.detect(prev_meta, curr_meta)
+                relationship = result.relationship
+                confidence = round(result.confidence, 3)
+                continuation_type = result.continuation_type
+                reason = result.reason
+            else:
+                # A physical page gap always breaks continuity.
+                relationship = "NEW_CONTENT"
+                confidence = 1.0
+                continuation_type = None
+                reason = "page gap between visual pages"
+            logger.info(
+                "continuation_detection_result",
+                extra={"extra_data": {
+                    "pdf": file_path.name,
+                    "previous_page": prev_meta.page_number,
+                    "current_page": curr_meta.page_number,
+                    "relationship": relationship,
+                    "continuation_type": continuation_type,
+                    "confidence": confidence,
+                    "reason": reason,
+                }},
+            )
+
+        # Build the actual extraction groups (single source of truth).
+        groups = build_extraction_groups(metas, self._continuation_detector)
+        for group in groups:
+            logger.info(
+                "extraction_group_created",
+                extra={"extra_data": {
+                    "pdf": file_path.name,
+                    "group_id": group.group_id,
+                    "page_numbers": group.page_numbers,
+                    "is_continuation": group.is_continuation,
+                    "continuation_type": group.continuation_type,
+                }},
+            )
+
+        return self._table_image_extractor.extract_groups(
+            file_path, groups, page_lookup
+        )
+
 
 # ── Pure merge helpers ────────────────────────────────────────────────────────
 
 def _merge_results(
     doc: DocumentClassification,
     body_text: str,
-    visual_results: dict[int, str],
+    visual_results: dict[int, PageExtractionResult],
     appendix_text: str,
-    failed_visual_pages: set[int] | None = None,
 ) -> str:
     """
     Assemble the final merged document text.
 
-    Structure:
-      [BODY]
+    Structure (unchanged — the merged-string contract to WorkflowExtractor is
+    preserved):
+      === DOCUMENT BODY ===
         <text page content in page order>
 
-      [TABLE AND DIAGRAM EXTRACTIONS]
-        Page N:
+      === TABLE AND DIAGRAM EXTRACTIONS ===
+        [Page N — <label>]
           <vision provider output for that page>
 
-      [APPENDIX]
+      === APPENDIX ===
         <appendix provider output>
 
-    The section headers tell the LLM that TABLE AND DIAGRAM EXTRACTIONS
-    contains supplementary structured data extracted from visual content,
-    and that APPENDIX contains supplementary rules and roles — both should
-    be used alongside the BODY when extracting workflow knowledge.
+    Per-page labels encode the PageExtractionResult status so the LLM and
+    operators can distinguish:
+      * SUCCESS         — genuine Vision extraction
+      * EMPTY           — Vision completed but found no content (raw text shown)
+      * PROVIDER_FAILED — Vision failed; degraded raw pypdf text shown
+      * RATE_LIMITED    — Vision rate-limited; degraded raw pypdf text shown
 
-    failed_visual_pages:
-        Set of page numbers (0-indexed) for which VisionProvider failed and
-        pypdf text was used as fallback. Those pages are labelled with a
-        VISION_UNAVAILABLE suffix so the LLM and operators can distinguish
-        garbled pypdf text from genuine Vision extraction.
+    An EMPTY page is NOT labelled as a failure — a failed page and an empty
+    page are kept distinct.
     """
-    _failed = failed_visual_pages or set()
     sections: list[str] = []
 
     # Body text
@@ -307,16 +396,24 @@ def _merge_results(
     if all_visual:
         visual_parts: list[str] = []
         for page in all_visual:
-            extracted = visual_results.get(page.page_number, "").strip()
-            if not extracted:
-                # Fallback to raw text if vision failed for this specific page
-                extracted = page.text.strip() or "(no content extracted)"
+            result = visual_results.get(page.page_number)
             base_label = "TABLE" if page.page_type == "table" else "DIAGRAM"
-            # Mark pages where Vision failed so the LLM sees the degraded signal
-            if page.page_number in _failed:
-                label = f"{base_label} — VISION UNAVAILABLE, RAW TEXT"
-            else:
+            raw_text = page.text.strip()
+
+            if result is not None and result.status == ExtractionStatus.SUCCESS:
+                extracted = result.text.strip() or raw_text or "(no content extracted)"
                 label = base_label
+            elif result is not None and result.status == ExtractionStatus.RATE_LIMITED:
+                extracted = raw_text or "(no content extracted — vision rate limited)"
+                label = f"{base_label} — VISION RATE LIMITED, RAW TEXT"
+            elif result is None or result.status == ExtractionStatus.PROVIDER_FAILED:
+                # No result, or provider failed — degraded fallback, marked.
+                extracted = raw_text or "(no content extracted — vision failed)"
+                label = f"{base_label} — VISION FAILED, RAW TEXT"
+            else:  # ExtractionStatus.EMPTY — completed, no content (not a failure)
+                extracted = raw_text or "(no content extracted)"
+                label = base_label
+
             visual_parts.append(
                 f"[Page {page.page_number + 1} — {label}]\n{extracted}"
             )

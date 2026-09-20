@@ -36,20 +36,20 @@ const WorkspaceDetail = () => {
   return (
     <div className="animate-in space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
           <FolderKanban size={16} className="text-gray-600" />
         </div>
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">{workspace.display_name}</h1>
-          <p className="text-sm text-gray-400">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold text-gray-900 truncate">{workspace.display_name}</h1>
+          <p className="text-sm text-gray-400 truncate">
             {workspace.organization_name || workspace.name}
             {overview?.domain ? ` · ${overview.domain}` : ""}
           </p>
         </div>
         <Link
           to={`/workspaces/${wsId}/build`}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-700 transition-colors shrink-0"
         >
           <Sparkles size={12} /> Build workflow
         </Link>
@@ -57,7 +57,7 @@ const WorkspaceDetail = () => {
 
       {/* Stats row */}
       {overview && (
-        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+        <div className="grid grid-cols-2 xs:grid-cols-4 lg:grid-cols-8 gap-2">
           <StatPill label="BRDs"      value={overview.brd_count} />
           <StatPill label="Actions"   value={overview.action_count} />
           <StatPill label="Triggers"  value={overview.trigger_count} />

@@ -31,12 +31,12 @@ const Integrations = () => {
   return (
     <div className="animate-in space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="page-header">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Integrations</h1>
           <p className="text-sm text-gray-500 mt-0.5">{integrations.length} connected</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-brand">
+        <button onClick={() => setShowCreate(true)} className="btn-brand w-full sm:w-auto">
           <Plus size={14} /> Add
         </button>
       </div>

@@ -40,7 +40,8 @@ from app.knowledge_ingestions.providers.base import VisionProvider, TextProvider
 # get its own instance — no shared mutable state between concurrent requests.
 
 _VISION_PROVIDERS: dict[str, Callable[[], VisionProvider]] = {
-    "gemini": lambda: _import_gemini().GeminiVisionProvider(),
+    "gemini":     lambda: _import_gemini().GeminiVisionProvider(),
+    "openrouter": lambda: _import_openrouter().OpenRouterVisionProvider(),
     # Future:
     # "openai":  lambda: _import_openai().OpenAIVisionProvider(),
     # "claude":  lambda: _import_claude().ClaudeVisionProvider(),

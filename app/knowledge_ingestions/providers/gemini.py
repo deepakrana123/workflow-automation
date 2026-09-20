@@ -25,6 +25,8 @@ Why inline_data over file upload API:
 import base64
 import os
 import time
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -75,6 +77,56 @@ def _post(payload: dict) -> str:
     if text.endswith("```"):
         text = text[:-3]
     return text.strip()
+
+
+def _parse_retry_after(response: "requests.Response | None") -> float | None:
+    """
+    Parse the Retry-After header into a wait in seconds, if present.
+
+    Retry-After may be either a non-negative integer (delta seconds) or an
+    HTTP-date. Returns None when the header is absent or unparseable — the
+    caller then falls back to exponential backoff with jitter.
+    """
+    if response is None:
+        return None
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    raw = raw.strip()
+
+    # Form 1: delta-seconds
+    try:
+        seconds = float(raw)
+        return max(0.0, seconds)
+    except (TypeError, ValueError):
+        pass
+
+    # Form 2: HTTP-date
+    try:
+        when = parsedate_to_datetime(raw)
+        if when is None:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        delta = (when - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _classify_http_error(status: int) -> tuple[str, bool]:
+    """
+    Map an HTTP status to (error_type, retryable) for VisionProviderError.
+
+      429            → rate_limit, retryable
+      401 / 403      → http_error, NOT retryable (auth/permission)
+      other          → http_error, retryable
+    """
+    if status == 429:
+        return VisionProviderError.ERROR_TYPE_RATE_LIMIT, True
+    if status in (401, 403):
+        return VisionProviderError.ERROR_TYPE_HTTP, False
+    return VisionProviderError.ERROR_TYPE_HTTP, True
 
 
 class GeminiVisionProvider(VisionProvider):
@@ -129,20 +181,26 @@ class GeminiVisionProvider(VisionProvider):
                 self.provider_name,
                 f"request timed out after {_TIMEOUT}s",
                 retryable=True,
+                error_type=VisionProviderError.ERROR_TYPE_TIMEOUT,
             )
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else 0
-            retryable = status not in (401, 403)
+            error_type, retryable = _classify_http_error(status)
+            retry_after = _parse_retry_after(exc.response)
             raise VisionProviderError(
                 self.provider_name,
                 f"HTTP {status}: {exc}",
                 retryable=retryable,
+                status_code=status,
+                error_type=error_type,
+                retry_after=retry_after,
             )
         except Exception as exc:
             raise VisionProviderError(
                 self.provider_name,
                 str(exc),
                 retryable=True,
+                error_type=VisionProviderError.ERROR_TYPE_UNKNOWN,
             )
 
 

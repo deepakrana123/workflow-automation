@@ -84,12 +84,52 @@ class TextProvider(ABC):
 # ── Provider-specific exceptions ──────────────────────────────────────────────
 
 class VisionProviderError(Exception):
-    """Raised by a VisionProvider on unrecoverable failure."""
+    """
+    Raised by a VisionProvider on unrecoverable failure.
 
-    def __init__(self, provider: str, message: str, retryable: bool = True):
+    Carries enough structured detail for the caller to distinguish a
+    rate-limit (HTTP 429) from a generic provider failure and to honour a
+    server-provided Retry-After. All new fields are optional and default to
+    None, so existing call sites — ``VisionProviderError(name, msg,
+    retryable=...)`` — keep working unchanged.
+
+    Fields:
+        provider     human-readable provider name (e.g. "gemini-vision:...")
+        retryable    whether a retry could plausibly succeed
+        status_code  HTTP status code when the failure was an HTTP error
+        error_type   coarse classification — one of the _ERROR_TYPE_* strings
+                     below ("rate_limit", "timeout", "http_error", "unknown")
+        retry_after  server-requested wait in seconds (parsed from the
+                     Retry-After header), when provided
+    """
+
+    # Coarse error-type vocabulary (kept as plain strings for log/JSON use).
+    ERROR_TYPE_RATE_LIMIT = "rate_limit"
+    ERROR_TYPE_TIMEOUT     = "timeout"
+    ERROR_TYPE_HTTP        = "http_error"
+    ERROR_TYPE_UNKNOWN     = "unknown"
+
+    def __init__(
+        self,
+        provider: str,
+        message: str,
+        retryable: bool = True,
+        *,
+        status_code: int | None = None,
+        error_type: str | None = None,
+        retry_after: float | None = None,
+    ):
         super().__init__(f"[{provider}] {message}")
-        self.provider  = provider
-        self.retryable = retryable
+        self.provider     = provider
+        self.retryable    = retryable
+        self.status_code  = status_code
+        self.error_type   = error_type
+        self.retry_after  = retry_after
+
+    @property
+    def is_rate_limited(self) -> bool:
+        """True when this failure is specifically a rate-limit (HTTP 429)."""
+        return self.status_code == 429 or self.error_type == self.ERROR_TYPE_RATE_LIMIT
 
 
 class TextProviderError(Exception):

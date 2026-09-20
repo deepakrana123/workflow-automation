@@ -35,7 +35,12 @@ BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 FATAL_STATUS_CODES = {401, 403}
 
 
-def try_call_openrouter(prompt: str) -> dict:
+def try_call_openrouter(prompt: str, model: str | None = None) -> dict:
+    # ``model`` lets a specific caller (e.g. BRD ingestion) override the model
+    # for this single call WITHOUT changing the shared module default MODEL.
+    # When None (every existing caller, including workflow generation), the
+    # process-wide OPENROUTER_MODEL is used — behaviour is unchanged.
+    selected_model = model or MODEL
     start = time.time()
 
     if not API_KEY:
@@ -57,7 +62,7 @@ def try_call_openrouter(prompt: str) -> dict:
         headers["X-Title"] = APP_NAME
 
     payload = {
-        "model": MODEL,
+        "model": selected_model,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -96,7 +101,7 @@ def try_call_openrouter(prompt: str) -> dict:
         logger.info(
             "openrouter_call_success",
             extra={"extra_data": {
-                "model":      MODEL,
+                "model":      selected_model,
                 "latency_ms": latency_ms,
             }},
         )

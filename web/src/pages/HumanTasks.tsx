@@ -71,7 +71,7 @@ const HumanTasks = () => {
     <div className="animate-in space-y-5">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Human Tasks</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -80,14 +80,14 @@ const HumanTasks = () => {
         </div>
         <button
           onClick={() => refetch()}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 shrink-0"
         >
           <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
         </button>
       </div>
 
       {/* ── Filter tabs ── */}
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         {FILTERS.map((f) => (
           <button
             key={f}

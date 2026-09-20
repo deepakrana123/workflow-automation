@@ -78,10 +78,19 @@ class LLMManager:
     #  Forced provider — used by fallback path in NLPWorkflowService      #
     # ------------------------------------------------------------------ #
 
-    def generate_with_provider(self, prompt: str, provider: str) -> dict:
+    def generate_with_provider(
+        self, prompt: str, provider: str, model: str | None = None
+    ) -> dict:
         """
         Force a specific provider, bypassing order but still respecting
         health state (will raise if provider is currently disabled).
+
+        ``model`` is an OPTIONAL per-call model override. When None (the
+        default, and what every existing caller passes — including the NL
+        workflow-generation pipeline), the provider uses its process-wide
+        configured model and behaviour is unchanged. When set, it is forwarded
+        to the provider for this single call only. This is used by BRD
+        ingestion to run a stronger model without touching the shared config.
         """
         provider_fn = self._provider_map.get(provider)
         if not provider_fn:
@@ -98,7 +107,9 @@ class LLMManager:
                 f"Cooldown: {remaining}s remaining."
             )
 
-        result = provider_fn(prompt)
+        # Only forward ``model`` when explicitly provided, so providers whose
+        # call signature does not accept a model parameter are unaffected.
+        result = provider_fn(prompt, model=model) if model is not None else provider_fn(prompt)
         result["provider"] = provider
 
         if result["success"]:

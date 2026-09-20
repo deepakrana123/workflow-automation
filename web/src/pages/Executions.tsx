@@ -32,7 +32,8 @@ const Executions = () => {
       </div>
 
       <div className="card overflow-hidden">
-        <table className="w-full">
+        <div className="table-wrap">
+        <table className="w-full min-w-[640px]">
           <thead><tr className="border-b border-gray-100 bg-gray-50/50">
             <th className="th">ID</th><th className="th">Workflow</th><th className="th">Status</th>
             <th className="th">Duration</th><th className="th">Retries</th><th className="th">Started</th>
@@ -53,6 +54,7 @@ const Executions = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {total > 20 && (
