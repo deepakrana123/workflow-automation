@@ -26,11 +26,13 @@ _MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
 class CrossEncoderReRanker:
-    def __init__(self, model_name: str = _MODEL_NAME, top_k: int = 20):
+    def __init__(self, model_name: str = _MODEL_NAME, top_k: int = 50):
         """
         model_name  — HuggingFace cross-encoder model to load
         top_k       — only re-rank the top-k candidates from RRF
-                      (rest are discarded; keeps latency low)
+                      (50 keeps the correct answer in the pool for small catalogs
+                      where RRF may push a single-source match beyond rank 20;
+                      ms-marco-MiniLM-L-6-v2 is fast enough on CPU for 50 pairs)
         """
         self.model = _CrossEncoder(model_name)
         self.top_k = top_k

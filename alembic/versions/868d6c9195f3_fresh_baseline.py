@@ -1,19 +1,19 @@
-"""baseline_clean_schema
+"""fresh_baseline
 
-Revision ID: 372acdc21acf
+Revision ID: 868d6c9195f3
 Revises: 
-Create Date: 2026-09-06 00:28:26.520433
+Create Date: 2026-10-17 22:18:38.986970
 
 """
 from typing import Sequence, Union
+import pgvector.sqlalchemy.vector
 
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-import pgvector
 
 # revision identifiers, used by Alembic.
-revision: str = '372acdc21acf'
+revision: str = '868d6c9195f3'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -33,9 +33,10 @@ def upgrade() -> None:
     sa.Column('output_schema', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('execution_template', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('active', sa.Boolean(), nullable=False),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), nullable=True),
+    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=1024), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('is_state_changing', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
@@ -66,7 +67,7 @@ def upgrade() -> None:
     sa.Column('active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), nullable=True),
+    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=1024), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
@@ -221,6 +222,10 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('workflow_knowledge_id', sa.Integer(), nullable=False),
     sa.Column('rule', sa.Text(), nullable=False),
+    sa.Column('condition', sa.Text(), nullable=True),
+    sa.Column('outcome', sa.Text(), nullable=True),
+    sa.Column('responsible_role', sa.Text(), nullable=True),
+    sa.Column('threshold', sa.Text(), nullable=True),
     sa.ForeignKeyConstraint(['workflow_knowledge_id'], ['workflow_knowledge.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

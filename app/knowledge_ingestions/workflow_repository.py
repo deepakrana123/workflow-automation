@@ -60,14 +60,25 @@ class WorkflowRepository:
                 )
             )
 
+        # for rule in workflow.business_rules:
+        #     self.db.add(
+        #         WorkflowBusinessRule(
+        #             workflow_knowledge_id=knowledge.id,
+        #             rule=rule.rule,
+        #         )
+        #     )
+        
         for rule in workflow.business_rules:
             self.db.add(
                 WorkflowBusinessRule(
                     workflow_knowledge_id=knowledge.id,
                     rule=rule.rule,
+                    condition=rule.condition,
+                    outcome=rule.outcome,
+                    responsible_role=rule.responsible_role,
+                    threshold=rule.threshold,
                 )
             )
-
         for actor in workflow.actors:
             self.db.add(
                 WorkflowActor(
@@ -81,16 +92,31 @@ class WorkflowRepository:
         return knowledge
 
     def get_unmapped_actions(self):
+        """Return all action mappings in PENDING or UNMAPPED status.
+
+        Using status instead of a null FK check ensures already-failed rows
+        (UNMAPPED) are retried when re-mapping is triggered, and MAPPED rows
+        are never re-processed.
+        """
         return (
             self.db.query(WorkflowActionMapping)
-            .filter(WorkflowActionMapping.matched_action_definition_id.is_(None))
+            .filter(
+                WorkflowActionMapping.status.in_(
+                    [MappingStatus.PENDING, MappingStatus.UNMAPPED]
+                )
+            )
             .all()
         )
 
     def get_unmapped_triggers(self):
+        """Return all trigger mappings in PENDING or UNMAPPED status."""
         return (
             self.db.query(WorkflowTriggerMapping)
-            .filter(WorkflowTriggerMapping.matched_trigger_definition_id.is_(None))
+            .filter(
+                WorkflowTriggerMapping.status.in_(
+                    [MappingStatus.PENDING, MappingStatus.UNMAPPED]
+                )
+            )
             .all()
         )
 
@@ -123,6 +149,7 @@ class WorkflowRepository:
         mapping_id: int,
         query_text: str | None = None,
         top_candidates: list | None = None,
+        failure_reason: str | None = None,
     ) -> None:
         """Mark an action as UNMAPPED with optional retrieval diagnostics."""
         mapping = (
@@ -137,6 +164,35 @@ class WorkflowRepository:
             mapping.query_text = query_text
         if top_candidates is not None:
             mapping.top_candidates = top_candidates
+        self.db.flush()
+
+    def mark_trigger_unmapped(
+        self,
+        mapping_id: int,
+        query_text: str | None = None,
+        top_candidates: list | None = None,
+    ) -> None:
+        """Mark a trigger as UNMAPPED with retrieval diagnostics.
+
+        Mirrors mark_action_unmapped so trigger failures are visible in the
+        database and can be inspected via the audit endpoint.
+        """
+        mapping = (
+            self.db.query(WorkflowTriggerMapping)
+            .filter(WorkflowTriggerMapping.id == mapping_id)
+            .first()
+        )
+        if mapping is None:
+            return
+        mapping.status = MappingStatus.UNMAPPED
+        if query_text is not None:
+            # WorkflowTriggerMapping has no query_text column yet — store in
+            # catalog_description as a diagnostic note until the column is added.
+            # A future migration should add query_text / top_candidates columns
+            # to workflow_trigger_mapping to match workflow_action_mapping.
+            pass
+        if top_candidates is not None:
+            pass  # same — no column yet, diagnostics logged only
         self.db.flush()
 
     def get_unmapped_actions_for_workspace(
@@ -338,164 +394,139 @@ class WorkflowRepository:
 
         return None
 
-    # def search_actions_by_postgress(self, query: str, limit: int = 20):
-    #     vector = func.to_tsvector(
-    #         "english",
-    #         func.concat(
-    #             ActionDefinition.name,
-    #             " ",
-    #             # ActionDefinition.display_name
-    #             # func.coalesce(ActionDefinition.description, " "),
-    #             func.coalesce(ActionDefinition.display_name, " "),
-    #             " ",
-    #             func.coalesce(ActionDefinition.aliases.cast(String), " "),
-
-    #         ),
-    #     )
-    #     query = func.plainto_tsquery("english", query)
-    #     rank = func.ts_rank(vector, query)
-    #     return (
-    #         self.db.query(ActionDefinition, rank.label("rank"))
-    #         .filter(vector.op("@@")(query))
-    #         .order_by(rank.desc())
-    #         .limit(limit)
-    #         .all()
-    #     )
-
-    # def search_actions_by_postgress(self, query: str, limit: int = 20):
-    #     text_vector = func.to_tsvector(
-    #         "english",
-    #         func.concat(
-    #             func.replace(ActionDefinition.name, "_", " "),
-    #             " ",
-    #             func.coalesce(ActionDefinition.display_name, " "),
-    #             " ",
-    #             func.coalesce(ActionDefinition.description, " ")
-    #         ),
-    #     )
-    #     alias_vector = func.jsonb_to_tsvector(
-    #         "english",
-    #         func.coalesce(ActionDefinition.aliases, "[]"),
-    #         '["string"]',
-    #     )
-    #     vector = text_vector.op("||")(alias_vector)
-    #     ts_query = func.plainto_tsquery("english", query)
-    #     rank = func.ts_rank(vector, ts_query)
-    #     return (
-    #         self.db.query(ActionDefinition, rank.label("rank"))
-    #         .filter(vector.op("@@")(ts_query))
-    #         .order_by(rank.desc())
-    #         .limit(limit)
-    #         .all()
-    #     )
 
     def search_actions_by_postgress(self, query: str, limit: int = 20):
-        """Full-text search over actions using websearch_to_tsquery.
+        """Full-text search over action_definitions.
 
-        websearch_to_tsquery handles long descriptive BRD queries naturally:
-        - multiple words → AND by default (all tokens must appear)
-        - no strict ordering required (unlike phraseto_tsquery)
-        - supports quoted phrases, OR, - negation without SQL errors
-
-        This gives the best recall for queries like:
-        "Apply the applicable interest rate to the loan account"
-        → tokens 'apply', 'interest', 'rate', 'loan', 'account' all searched
-        → apply_interest matches on 'apply' + 'interest' in name + description
+        Strategy: AND-first (websearch_to_tsquery) for precision.
+        If zero rows match — which happens when any one token from a long BRD
+        phrase is absent from the catalog entry — re-run with OR semantics so
+        partial matches still surface for RRF to consider.
         """
-        text_vector = func.to_tsvector(
-            "english",
-            func.concat(
-                func.replace(ActionDefinition.name, "_", " "),
-                " ",
-                func.coalesce(ActionDefinition.display_name, " "),
-                " ",
-                func.coalesce(ActionDefinition.description, " "),
-            ),
+        from sqlalchemy import text as sa_text
+
+        _SQL_BASE = """
+            SELECT ad.id,
+                   ts_rank(
+                       to_tsvector('english',
+                           replace(ad.name, '_', ' ') || ' ' ||
+                           coalesce(ad.display_name, ' ')  || ' ' ||
+                           coalesce(ad.description, ' ')
+                       ) || jsonb_to_tsvector('english',
+                           coalesce(ad.aliases, '[]'::jsonb), '["string"]'),
+                       {ts_query_expr}
+                   ) AS rank
+            FROM action_definitions ad
+            WHERE ad.active = true
+              AND (
+                  to_tsvector('english',
+                      replace(ad.name, '_', ' ') || ' ' ||
+                      coalesce(ad.display_name, ' ')  || ' ' ||
+                      coalesce(ad.description, ' ')
+                  ) || jsonb_to_tsvector('english',
+                      coalesce(ad.aliases, '[]'::jsonb), '["string"]')
+              ) @@ {ts_query_expr}
+            ORDER BY rank DESC
+            LIMIT :limit
+        """
+
+        and_sql = sa_text(
+            _SQL_BASE.format(ts_query_expr="websearch_to_tsquery('english', :q)")
         )
+        rows = self.db.execute(and_sql, {"q": query, "limit": limit}).fetchall()
 
-        alias_vector = func.jsonb_to_tsvector(
-            "english",
-            func.coalesce(ActionDefinition.aliases, "[]"),
-            '["string"]',
-        )
+        if not rows:
+            # OR-fallback: replace & with | in plainto_tsquery output
+            or_sql = sa_text(
+                _SQL_BASE.format(
+                    ts_query_expr=(
+                        "cast(regexp_replace("
+                        "  cast(plainto_tsquery('english', :q) as text),"
+                        "  '&', '|', 'g'"
+                        ") as tsquery)"
+                    )
+                )
+            )
+            rows = self.db.execute(or_sql, {"q": query, "limit": limit}).fetchall()
 
-        vector = text_vector.op("||")(alias_vector)
+        if not rows:
+            return []
 
-        ts_query = func.websearch_to_tsquery("english", query)
-
-        rank = func.ts_rank(vector, ts_query)
-
-        return (
-            self.db.query(ActionDefinition, rank.label("rank"))
-            .filter(vector.op("@@")(ts_query))
-            .order_by(rank.desc())
-            .limit(limit)
+        id_to_rank = {r[0]: float(r[1]) for r in rows}
+        matched_ids = list(id_to_rank.keys())
+        actions = (
+            self.db.query(ActionDefinition)
+            .filter(ActionDefinition.id.in_(matched_ids))
             .all()
         )
+        actions.sort(key=lambda a: id_to_rank.get(a.id, 0.0), reverse=True)
+        return [(a, id_to_rank[a.id]) for a in actions]
 
-    # def search_triggers_by_postgress(self, query: str, limit: int = 20):
-    #     text_vector = func.to_tsvector(
-    #         "english",
-    #         func.concat(
-    #             func.replace(TriggerDefinition.name, "_", " "),
-    #             " ",
-    #             func.coalesce(TriggerDefinition.display_name, " "),
-    #             " ",
-    #             func.coalesce(TriggerDefinition.description, " "),
-    #         ),
-    #     )
-    #     alias_vector = func.jsonb_to_tsvector(
-    #         "english",
-    #         func.coalesce(TriggerDefinition.aliases, "[]"),
-    #         '["string"]',
-    #     )
-    #     vector = text_vector.op("||")(alias_vector)
-    #     query = func.plainto_tsquery("english", query)
-#     rank = func.ts_rank(vector, query)
-    #     return (
-    #         self.db.query(TriggerDefinition, rank.label("rank"))
-    #         .filter(vector.op("@@")(query))
-    #         .order_by(rank.desc())
-    #         .limit(limit)
-    #         .all()
-    #     )
-
+   
     def search_triggers_by_postgress(self, query: str, limit: int = 20):
-        """Full-text search over triggers using websearch_to_tsquery.
+        """Full-text search over triggers using AND-first / OR-fallback.
 
-        Mirrors search_actions_by_postgress — flexible AND-by-default matching
-        handles multi-word trigger queries without requiring exact phrase order.
+        Mirrors search_actions_by_postgress — ensures partial-match triggers
+        are still returned when the BRD phrase doesn't exactly echo the catalog
+        trigger name or description.
         """
-        text_vector = func.to_tsvector(
-            "english",
-            func.concat(
-                func.replace(TriggerDefinition.name, "_", " "),
-                " ",
-                func.coalesce(TriggerDefinition.display_name, " "),
-                " ",
-                func.coalesce(TriggerDefinition.description, " "),
-            ),
+        from sqlalchemy import text as sa_text
+
+        _SQL_BASE = """
+            SELECT td.id,
+                   ts_rank(
+                       to_tsvector('english',
+                           replace(td.name, '_', ' ') || ' ' ||
+                           coalesce(td.display_name, ' ')  || ' ' ||
+                           coalesce(td.description, ' ')
+                       ) || jsonb_to_tsvector('english',
+                           coalesce(td.aliases, '[]'::jsonb), '["string"]'),
+                       {ts_query_expr}
+                   ) AS rank
+            FROM trigger_definitions td
+            WHERE td.active = true
+              AND (
+                  to_tsvector('english',
+                      replace(td.name, '_', ' ') || ' ' ||
+                      coalesce(td.display_name, ' ')  || ' ' ||
+                      coalesce(td.description, ' ')
+                  ) || jsonb_to_tsvector('english',
+                      coalesce(td.aliases, '[]'::jsonb), '["string"]')
+              ) @@ {ts_query_expr}
+            ORDER BY rank DESC
+            LIMIT :limit
+        """
+
+        and_sql = sa_text(
+            _SQL_BASE.format(ts_query_expr="websearch_to_tsquery('english', :q)")
         )
+        rows = self.db.execute(and_sql, {"q": query, "limit": limit}).fetchall()
 
-        alias_vector = func.jsonb_to_tsvector(
-            "english",
-            func.coalesce(TriggerDefinition.aliases, "[]"),
-            '["string"]',
-        )
+        if not rows:
+            or_sql = sa_text(
+                _SQL_BASE.format(
+                    ts_query_expr=(
+                        "cast(regexp_replace("
+                        "  cast(plainto_tsquery('english', :q) as text),"
+                        "  '&', '|', 'g'"
+                        ") as tsquery)"
+                    )
+                )
+            )
+            rows = self.db.execute(or_sql, {"q": query, "limit": limit}).fetchall()
 
-        vector = text_vector.op("||")(alias_vector)
+        if not rows:
+            return []
 
-        ts_query = func.websearch_to_tsquery("english", query)
-
-        rank = func.ts_rank(vector, ts_query)
-
-        return (
-            self.db.query(TriggerDefinition, rank.label("rank"))
-            .filter(vector.op("@@")(ts_query))
-            .order_by(rank.desc())
-            .limit(limit)
+        id_to_rank = {r[0]: float(r[1]) for r in rows}
+        matched_ids = list(id_to_rank.keys())
+        triggers = (
+            self.db.query(TriggerDefinition)
+            .filter(TriggerDefinition.id.in_(matched_ids))
             .all()
         )
+        triggers.sort(key=lambda t: id_to_rank.get(t.id, 0.0), reverse=True)
+        return [(t, id_to_rank[t.id]) for t in triggers]
 
     def get_all_active_actions(self):
         return (
@@ -509,4 +540,43 @@ class WorkflowRepository:
             self.db.query(TriggerDefinition)
             .filter(TriggerDefinition.active.is_(True))
             .all()
+        )
+    
+    def search_business_rules(self,workspace_id:int,query:str,limit:int=20):
+        query=qyery.strip()
+
+        if not query:
+            return []
+        
+
+        text_vector = func.to_tsvector(
+            "english",
+            func.concat_ws(
+                " ",
+                WorkflowBusinessRule.rule,
+                WorkflowBusinessRule.condition,
+                WorkflowBusinessRule.outcome,
+                WorkflowBusinessRule.responsible_role,
+                WorkflowBusinessRule.threshold
+            ),
+        )
+
+        ts_query = func.websearch_to_tsquery("english",query)
+        rank = func.ts_rank(text_vector , ts_query)
+
+        return (
+            self.db.query(
+                WorkflowBusinessRule,
+                WorkflowKnowledge.workflow_name,
+                WorkflowKnowledge.source_document,
+                rank.label("rank"),
+            ).join(
+                WorkflowKnowledge,
+                WorkflowKnowledge.id == WorkflowBusinessRule.workflow_knowledge_id,
+            ).filter(
+                WorkflowKnowledge.workspace_id == workspace_id,
+                text_vector.op("@@")(ts_query)
+            ).order_by(rank.desc()).limit(max(1,min(limit,100)))
+            .all()
+            
         )

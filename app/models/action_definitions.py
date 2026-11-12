@@ -101,3 +101,9 @@ class ActionDefinition(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    
+    is_state_changing = Column(
+            Boolean,
+            nullable=False,
+            default=False,
+        )

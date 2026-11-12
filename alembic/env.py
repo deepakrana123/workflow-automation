@@ -32,6 +32,7 @@ from app.models.business_rule_definition import BusinessRuleDefinition
 from app.models.role_assignment import RoleAssignment
 from app.models.workflow_chain import WorkflowChain
 from app.models.human_task import HumanTask
+from app.models.workflow_rule_metadata import WorkflowRuleMetadata
 config = context.config
 
 # Override sqlalchemy.url from .env — never store credentials in alembic.ini

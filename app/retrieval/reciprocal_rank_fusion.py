@@ -16,8 +16,13 @@ from app.retrieval.models import RetrievalCandidate, RankedCandidate
 
 class ReciprocalRankFusion:
 
-    def __init__(self, k: int = 60):
-        # k=60 is the standard default; lower k rewards top ranks more aggressively
+    def __init__(self, k: int = 20):
+        # k=20 rewards single-source top-ranked results more aggressively than the
+        # Cormack default of 60.  With k=60 a correct answer ranked #1 in only one
+        # retriever scores 1/61 ≈ 0.016, easily beaten by a wrong candidate that
+        # appears in all three lists at rank 5 (3×1/65 ≈ 0.046).  k=20 raises
+        # the lone top-1 contribution to 1/21 ≈ 0.048, making it competitive.
+        # Rule retrieval still uses k=60 via its own RRF instance.
         self.k = k
 
     def fuse(
