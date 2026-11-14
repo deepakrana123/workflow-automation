@@ -40,6 +40,15 @@ class WorkflowTriggerMapping(Base):
     similarity_score = Column(Float, nullable=True)
     confidence = Column(Float, nullable=True)
 
+    # ── Retrieval diagnostics (mirrors WorkflowActionMapping) ─────────────────
+    # Combined query text sent to BM25 and Postgres retrieval.
+    query_text = Column(Text, nullable=True)
+
+    # Top-K candidates from the full retrieval run, stored for observability.
+    # Each entry: {name, rrf_score, cross_encoder_score, vector_rank,
+    #              bm25_rank, postgres_rank, confidence}
+    top_candidates = Column(JSONB, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # ── Snapshot of TriggerDefinition at mapping time ─────────────────────────

@@ -79,8 +79,8 @@ class KnowledgeIngestionService:
                 workspace_id=workspace_id,
                 source_document=source_document,
             )
-            self.embedding_mapper.map_actions()
-            self.embedding_mapper.map_triggers()
+            self.embedding_mapper.map_actions(workspace_id=workspace_id)
+            self.embedding_mapper.map_triggers(workspace_id=workspace_id)
             self.db.commit()
             return knowledge
         except Exception as e:

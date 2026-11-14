@@ -9,6 +9,7 @@ from app.models.generation_log import GenerationLog
 from app.models.trigger_definitions import TriggerDefinition
 from app.models.action_definitions import ActionDefinition
 from app.models.human_task import HumanTask
+from app.models.tenant import Tenant
 from app.models.workspace import Workspace
 from app.models.workflow_knowledge import WorkflowKnowledge
 from app.models.workflow_action_mapping import WorkflowActionMapping, MappingStatus
@@ -20,15 +21,21 @@ from app.models.evalution_case import EvaluationCase
 from app.models.business_rule_definition import BusinessRuleDefinition
 from app.models.role_assignment import RoleAssignment
 from app.models.workflow_chain import WorkflowChain, ChainMatchType, ChainStatus
+from app.models.brd_document import BRDDocument, IngestionStatus, DocumentType
+from app.models.document_version import DocumentVersion, VersionStatus
+from app.models.ingestion_attempt import IngestionAttempt, AttemptStatus, AttemptErrorCode
 
 __all__ = [
     "Workflow", "WorkflowRun", "WorkflowExecution", "ExecutionStep",
     "TraceEvent", "StepRetryHistory", "AuditLog",
     "GenerationLog", "TriggerDefinition", "ActionDefinition", "HumanTask",
-    "Workspace", "WorkflowKnowledge", "WorkflowActionMapping", "MappingStatus",
+    "Workspace", "Tenant", "WorkflowKnowledge", "WorkflowActionMapping", "MappingStatus",
     "WorkflowTriggerMapping", "WorkflowBusinessRule", "WorkflowActor",
     "WorkspaceIntegration",
     "EvaluationCase",
     "BusinessRuleDefinition", "RoleAssignment",
     "WorkflowChain", "ChainMatchType", "ChainStatus",
+    "BRDDocument", "IngestionStatus", "DocumentType",
+    "DocumentVersion", "VersionStatus",
+    "IngestionAttempt", "AttemptStatus", "AttemptErrorCode",
 ]

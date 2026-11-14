@@ -91,34 +91,49 @@ class WorkflowRepository:
         self.db.flush()
         return knowledge
 
-    def get_unmapped_actions(self):
-        """Return all action mappings in PENDING or UNMAPPED status.
+    def get_unmapped_actions(self, workspace_id: int | None = None):
+        """Return action mappings in PENDING or UNMAPPED status.
 
-        Using status instead of a null FK check ensures already-failed rows
-        (UNMAPPED) are retried when re-mapping is triggered, and MAPPED rows
-        are never re-processed.
+        When workspace_id is provided (the normal case), results are scoped to
+        that workspace via a join through WorkflowKnowledge.  Passing None
+        returns all rows across all workspaces — only used in tests or
+        single-tenant admin tooling.
         """
-        return (
+        q = (
             self.db.query(WorkflowActionMapping)
             .filter(
                 WorkflowActionMapping.status.in_(
                     [MappingStatus.PENDING, MappingStatus.UNMAPPED]
                 )
             )
-            .all()
         )
+        if workspace_id is not None:
+            q = q.join(
+                WorkflowKnowledge,
+                WorkflowKnowledge.id == WorkflowActionMapping.workflow_knowledge_id,
+            ).filter(WorkflowKnowledge.workspace_id == workspace_id)
+        return q.all()
 
-    def get_unmapped_triggers(self):
-        """Return all trigger mappings in PENDING or UNMAPPED status."""
-        return (
+    def get_unmapped_triggers(self, workspace_id: int | None = None):
+        """Return trigger mappings in PENDING or UNMAPPED status.
+
+        Scoped to workspace_id when provided — prevents one workspace's
+        PENDING rows from being processed during another workspace's ingestion.
+        """
+        q = (
             self.db.query(WorkflowTriggerMapping)
             .filter(
                 WorkflowTriggerMapping.status.in_(
                     [MappingStatus.PENDING, MappingStatus.UNMAPPED]
                 )
             )
-            .all()
         )
+        if workspace_id is not None:
+            q = q.join(
+                WorkflowKnowledge,
+                WorkflowKnowledge.id == WorkflowTriggerMapping.workflow_knowledge_id,
+            ).filter(WorkflowKnowledge.workspace_id == workspace_id)
+        return q.all()
 
     def search_actions_by_embedding(
         self, embedding, limit: int = 20
@@ -172,11 +187,7 @@ class WorkflowRepository:
         query_text: str | None = None,
         top_candidates: list | None = None,
     ) -> None:
-        """Mark a trigger as UNMAPPED with retrieval diagnostics.
-
-        Mirrors mark_action_unmapped so trigger failures are visible in the
-        database and can be inspected via the audit endpoint.
-        """
+        """Mark a trigger as UNMAPPED with retrieval diagnostics."""
         mapping = (
             self.db.query(WorkflowTriggerMapping)
             .filter(WorkflowTriggerMapping.id == mapping_id)
@@ -186,13 +197,9 @@ class WorkflowRepository:
             return
         mapping.status = MappingStatus.UNMAPPED
         if query_text is not None:
-            # WorkflowTriggerMapping has no query_text column yet — store in
-            # catalog_description as a diagnostic note until the column is added.
-            # A future migration should add query_text / top_candidates columns
-            # to workflow_trigger_mapping to match workflow_action_mapping.
-            pass
+            mapping.query_text = query_text
         if top_candidates is not None:
-            pass  # same — no column yet, diagnostics logged only
+            mapping.top_candidates = top_candidates
         self.db.flush()
 
     def get_unmapped_actions_for_workspace(
@@ -278,6 +285,8 @@ class WorkflowRepository:
         trigger_definition_id: int,
         similarity_score: float,
         confidence: float,
+        query_text: str | None = None,
+        top_candidates: list | None = None,
         # ── snapshot fields copied from TriggerDefinition at mapping time ──
         trigger_name: str | None = None,
         display_name: str | None = None,
@@ -296,6 +305,10 @@ class WorkflowRepository:
         mapping.similarity_score = similarity_score
         mapping.confidence = confidence
         mapping.status = MappingStatus.MAPPED
+        if query_text is not None:
+            mapping.query_text = query_text
+        if top_candidates is not None:
+            mapping.top_candidates = top_candidates
         # Write snapshot — generation reads these, never TriggerDefinition
         if trigger_name is not None:
             mapping.trigger_name = trigger_name
@@ -542,8 +555,8 @@ class WorkflowRepository:
             .all()
         )
     
-    def search_business_rules(self,workspace_id:int,query:str,limit:int=20):
-        query=qyery.strip()
+    def search_business_rules(self, workspace_id: int, query: str, limit: int = 20):
+        query = query.strip()
 
         if not query:
             return []

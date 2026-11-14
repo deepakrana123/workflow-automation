@@ -116,19 +116,17 @@ class EmbeddingMapper:
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
-    def map_actions(self, embedding_variant: str = "name_description") -> None:
+    def map_actions(
+        self,
+        embedding_variant: str = "name_description",
+        workspace_id: int | None = None,
+    ) -> None:
         """Map every PENDING/UNMAPPED action against the catalog.
 
-        For each mapping:
-          1. Build the retrieval query from extract_name + BRD description
-          2. Normalise the query to remove boilerplate
-          3. Embed with the same model used to index the catalog
-          4. Run the full retrieval pipeline (retrieve → fuse → rerank)
-          5. Persist top-K candidates for observability
-          6. Apply the decision threshold
-          7. Write MAPPED or UNMAPPED with confidence/diagnostics
+        workspace_id scopes the query to one workspace so a concurrent ingest
+        for another workspace does not pick up unrelated PENDING rows.
         """
-        for action in self.repository.get_unmapped_actions():
+        for action in self.repository.get_unmapped_actions(workspace_id=workspace_id):
             raw_query = f"{action.extract_name} {action.description or ''}".strip()
             query     = _normalize_query(raw_query)
 
@@ -199,18 +197,16 @@ class EmbeddingMapper:
 
     # ── Triggers ──────────────────────────────────────────────────────────────
 
-    def map_triggers(self, embedding_variant: str = "name_description") -> None:
+    def map_triggers(
+        self,
+        embedding_variant: str = "name_description",
+        workspace_id: int | None = None,
+    ) -> None:
         """Map every PENDING/UNMAPPED trigger against the catalog.
 
-        Mirrors map_actions exactly:
-          - Uses retrieve_triggers (full list) so diagnostics are available
-            before the threshold decision is applied.
-          - Calls mark_trigger_unmapped on failure so every trigger row gets
-            a final status (no more silent PENDING rows after ingestion).
-          - Embeds the full query text (not just the extracted name) so the
-            vector is in the same distribution as the catalog embeddings.
+        workspace_id scopes the query to one workspace — mirrors map_actions.
         """
-        for trigger in self.repository.get_unmapped_triggers():
+        for trigger in self.repository.get_unmapped_triggers(workspace_id=workspace_id):
             raw_query = f"{trigger.extracted_name} {trigger.description or ''}".strip()
             query     = _normalize_query(raw_query)
 
@@ -243,6 +239,8 @@ class EmbeddingMapper:
                     trigger_definition_id=td.id,
                     similarity_score=float(best.rrf_score),
                     confidence=real_confidence,
+                    query_text=query,
+                    top_candidates=top_candidates_json,
                     trigger_name=td.name,
                     display_name=getattr(td, "display_name", None),
                     catalog_description=getattr(td, "description", None),

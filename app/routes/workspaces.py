@@ -67,46 +67,30 @@ def list_workspaces(active_only: bool = True, db: Session = Depends(get_db)):
 
 @router.post("", response_model=WorkspaceResponse, status_code=201)
 def create_workspace(body: WorkspaceCreate, db: Session = Depends(get_db)):
-    """Create a workspace at a specific level in the bank hierarchy.
+    """Create a workspace (product/knowledge domain) inside a tenant (bank).
 
-    Rules:
-      - global   → parent_id must be None
-      - region   → parent_id must point to a global workspace
-      - zone     → parent_id must point to a region workspace
-      - branch   → parent_id must point to a zone workspace
+    `tenant_id` must reference an existing, active tenant.
+    Within the same tenant, workspace names must be unique.
+    Different tenants may have workspaces with the same name (e.g. both can
+    have "Personal Loan").
     """
-    from app.models.workspace import WORKSPACE_LEVELS, _PARENT_LEVEL
+    from app.models.tenant import Tenant as TenantModel
 
-    # Parent validation skipped for now — level defaults to branch,
-    # hierarchy enforcement will be added when multi-level rule inheritance
-    # is required.
-    if body.parent_id is not None:
-        parent = db.query(Workspace).filter(Workspace.id == body.parent_id).first()
-        if parent is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Parent workspace {body.parent_id} not found.",
-            )
-
-    # Enforce single global workspace per deployment
-    if body.level == "global":
-        existing_global = (
-            db.query(Workspace).filter(Workspace.level == "global").first()
+    tenant = db.query(TenantModel).filter(
+        TenantModel.id == body.tenant_id,
+        TenantModel.active.is_(True),
+    ).first()
+    if tenant is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tenant {body.tenant_id} not found or is inactive.",
         )
-        if existing_global is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A global workspace already exists (id={existing_global.id}). "
-                       "Only one global workspace is allowed per deployment.",
-            )
 
     workspace = Workspace(
+        tenant_id=body.tenant_id,
         name=body.name,
         display_name=body.display_name,
         description=body.description,
-        organization_name=body.organization_name,
-        level=body.level,
-        parent_id=body.parent_id,
         active=True,
     )
     db.add(workspace)
@@ -116,7 +100,10 @@ def create_workspace(body: WorkspaceCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"Workspace name '{body.name}' already exists.",
+            detail=(
+                f"A workspace named '{body.name}' already exists "
+                f"for tenant {body.tenant_id}."
+            ),
         )
     db.refresh(workspace)
     return workspace

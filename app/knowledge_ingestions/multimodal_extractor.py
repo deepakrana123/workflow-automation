@@ -133,117 +133,15 @@ class MultiModalDocumentExtractor:
         if not file_path.exists():
             raise DocumentExtractionError(f"File not found: {file_path}")
 
-        # ── Step 1: Classify all pages (local, fast, no LLM) ─────────────────
-        try:
-            doc = self._classifier.classify(file_path)
-        except Exception as exc:
-            logger.warning(
-                "multimodal_extractor_classification_failed",
-                extra={"extra_data": {
-                    "pdf":   file_path.name,
-                    "error": str(exc),
-                }},
-            )
-            # Classification failed — fall back to the original plain text extractor
-            logger.info(
-                "multimodal_extractor_fallback_plain",
-                extra={"extra_data": {"pdf": file_path.name}},
-            )
-            return self._plain_extractor.extract(file_path)
+        doc, text_result, visual_result, appendix_result = \
+            self._run_parallel_extraction(file_path)
 
-        logger.info(
-            "multimodal_extractor_classification_done",
-            extra={"extra_data": {
-                "pdf":         file_path.name,
-                "total_pages": doc.total_pages,
-                "text_pages":  len(doc.text_pages),
-                "table_pages": len(doc.table_pages),
-                "image_pages": len(doc.image_pages),
-                "appendix_pages": len(doc.appendix_pages),
-            }},
-        )
+        # Plain-text-only fast path was already handled inside
+        # _run_parallel_extraction; if doc is None it used the plain extractor
+        # and text_result is the full merged string already.
+        if doc is None:
+            return text_result
 
-        # If the document is entirely plain text pages, skip the multimodal
-        # overhead and use the plain extractor directly — no parallel threads,
-        # no API calls, just pypdf.
-        if not doc.has_rich_content() and not doc.appendix_pages:
-            logger.info(
-                "multimodal_extractor_plain_text_only",
-                extra={"extra_data": {"pdf": file_path.name}},
-            )
-            return self._plain_extractor.extract(file_path)
-
-        # ── Step 2: Run three extraction paths in parallel ────────────────────
-        text_result:    str = ""
-        visual_result:  dict[int, PageExtractionResult] = {}
-        appendix_result: str = ""
-
-        # Visual pages in document order — needed for the fallback path and by
-        # the merge step below.
-        all_visual_pages = sorted(
-            doc.table_pages + doc.image_pages,
-            key=lambda p: p.page_number,
-        )
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            # Thread A — body text (already extracted during classification)
-            future_text = pool.submit(
-                self._extract_body_text, doc
-            )
-
-            # Thread B — table + image pages via VisionProvider, grouped by
-            # continuation detection (independent groups may run concurrently,
-            # continuation groups stay ordered with compact context).
-            future_visual = pool.submit(
-                self._extract_visual, file_path, all_visual_pages
-            )
-
-            # Thread C — appendix pages via TextProvider
-            future_appendix = pool.submit(
-                self._appendix_extractor.extract,
-                doc.appendix_pages,
-            )
-
-            # Collect — exceptions from threads are surfaced here
-            try:
-                text_result = future_text.result()
-            except Exception as exc:
-                logger.warning(
-                    "multimodal_extractor_body_text_failed",
-                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
-                )
-
-            try:
-                visual_result = future_visual.result()
-            except Exception as exc:
-                logger.warning(
-                    "multimodal_extractor_visual_failed",
-                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
-                )
-                # Whole-thread failure — record every visual page as a provider
-                # failure (NOT empty) so the merge marks them clearly and the
-                # raw pypdf text is used as a degraded fallback.
-                visual_result = {
-                    p.page_number: PageExtractionResult(
-                        page_number=p.page_number,
-                        status=ExtractionStatus.PROVIDER_FAILED,
-                        provider=self._vision_provider.provider_name,
-                        error_type="extractor_thread_failed",
-                    )
-                    for p in all_visual_pages
-                }
-
-            try:
-                appendix_result = future_appendix.result()
-            except Exception as exc:
-                logger.warning(
-                    "multimodal_extractor_appendix_failed",
-                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
-                )
-                # Fallback: use raw pypdf text for appendix pages
-                appendix_result = _combine_raw_text(doc.appendix_pages)
-
-        # ── Step 3: Merge all results in structured order ─────────────────────
         merged = _merge_results(
             doc=doc,
             body_text=text_result,
@@ -265,7 +163,165 @@ class MultiModalDocumentExtractor:
         )
         return merged
 
+    def extract_structured(
+        self,
+        file_path: Path,
+    ) -> tuple[str, "DocumentClassification | None", "dict[int, PageExtractionResult]"]:
+        """Return the merged string AND the structured intermediate results.
+
+        This is the preferred call site for PdfExtractionPipeline because it
+        gives per-page classification and per-page visual results without any
+        string parsing.  The merged string is also returned so callers that
+        need it (WorkflowExtractor) do not need a second extraction pass.
+
+        ``extract()`` is NOT changed — all existing callers remain unaffected.
+
+        Returns:
+            merged_text:        same string as extract() would return.
+            doc_classification: DocumentClassification from PageClassifier, or
+                                None when the plain-text fast path was taken or
+                                classification failed.
+            visual_results:     {page_number: PageExtractionResult} for every
+                                table/image page that was sent to VisionProvider.
+                                Empty dict when there are no visual pages.
+
+        Raises:
+            DocumentExtractionError: only when the entire document is unreadable
+                                     (same contract as extract()).
+        """
+        if not file_path.exists():
+            raise DocumentExtractionError(f"File not found: {file_path}")
+
+        doc, text_result, visual_result, appendix_result = \
+            self._run_parallel_extraction(file_path)
+
+        if doc is None:
+            # Plain-text fast path — text_result is the full merged string.
+            return text_result, None, {}
+
+        merged = _merge_results(
+            doc=doc,
+            body_text=text_result,
+            visual_results=visual_result,
+            appendix_text=appendix_result,
+        )
+
+        if not merged.strip():
+            raise DocumentExtractionError(
+                f"No extractable content found in {file_path.name}"
+            )
+
+        logger.info(
+            "multimodal_extractor_complete",
+            extra={"extra_data": {
+                "pdf":          file_path.name,
+                "output_chars": len(merged),
+            }},
+        )
+        return merged, doc, visual_result
+
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _run_parallel_extraction(
+        self,
+        file_path: Path,
+    ) -> "tuple[DocumentClassification | None, str, dict[int, PageExtractionResult], str]":
+        """Core extraction logic shared by extract() and extract_structured().
+
+        Returns (doc, text_result, visual_result, appendix_result).
+
+        When the plain-text fast path is taken (or classification fails),
+        ``doc`` is None and ``text_result`` contains the full merged string
+        produced by the plain extractor.  ``visual_result`` and
+        ``appendix_result`` are empty in that case.
+        """
+        # ── Step 1: Classify all pages (local, fast, no LLM) ─────────────────
+        try:
+            doc = self._classifier.classify(file_path)
+        except Exception as exc:
+            logger.warning(
+                "multimodal_extractor_classification_failed",
+                extra={"extra_data": {
+                    "pdf":   file_path.name,
+                    "error": str(exc),
+                }},
+            )
+            logger.info(
+                "multimodal_extractor_fallback_plain",
+                extra={"extra_data": {"pdf": file_path.name}},
+            )
+            return None, self._plain_extractor.extract(file_path), {}, ""
+
+        logger.info(
+            "multimodal_extractor_classification_done",
+            extra={"extra_data": {
+                "pdf":         file_path.name,
+                "total_pages": doc.total_pages,
+                "text_pages":  len(doc.text_pages),
+                "table_pages": len(doc.table_pages),
+                "image_pages": len(doc.image_pages),
+                "appendix_pages": len(doc.appendix_pages),
+            }},
+        )
+
+        # Plain-text-only fast path
+        if not doc.has_rich_content() and not doc.appendix_pages:
+            logger.info(
+                "multimodal_extractor_plain_text_only",
+                extra={"extra_data": {"pdf": file_path.name}},
+            )
+            return None, self._plain_extractor.extract(file_path), {}, ""
+
+        # ── Step 2: Run three extraction paths in parallel ────────────────────
+        text_result:     str = ""
+        visual_result:   dict[int, PageExtractionResult] = {}
+        appendix_result: str = ""
+
+        all_visual_pages = sorted(
+            doc.table_pages + doc.image_pages,
+            key=lambda p: p.page_number,
+        )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            future_text     = pool.submit(self._extract_body_text, doc)
+            future_visual   = pool.submit(self._extract_visual, file_path, all_visual_pages)
+            future_appendix = pool.submit(self._appendix_extractor.extract, doc.appendix_pages)
+
+            try:
+                text_result = future_text.result()
+            except Exception as exc:
+                logger.warning(
+                    "multimodal_extractor_body_text_failed",
+                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
+                )
+
+            try:
+                visual_result = future_visual.result()
+            except Exception as exc:
+                logger.warning(
+                    "multimodal_extractor_visual_failed",
+                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
+                )
+                visual_result = {
+                    p.page_number: PageExtractionResult(
+                        page_number=p.page_number,
+                        status=ExtractionStatus.PROVIDER_FAILED,
+                        provider=self._vision_provider.provider_name,
+                        error_type="extractor_thread_failed",
+                    )
+                    for p in all_visual_pages
+                }
+
+            try:
+                appendix_result = future_appendix.result()
+            except Exception as exc:
+                logger.warning(
+                    "multimodal_extractor_appendix_failed",
+                    extra={"extra_data": {"pdf": file_path.name, "error": str(exc)}},
+                )
+                appendix_result = _combine_raw_text(doc.appendix_pages)
+
+        return doc, text_result, visual_result, appendix_result
 
     def _extract_body_text(self, doc: DocumentClassification) -> str:
         """

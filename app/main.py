@@ -23,6 +23,7 @@ from app.routes.capabilities import router as capabilities_router
 from app.routes.rbac import router as rbac_router
 from app.routes.runtime import router as runtime_router
 from app.routes.mock import router as mock_router
+from app.routes.tenants import router as tenants_router
 from app.core import startup as startup_module
 
 
@@ -71,6 +72,7 @@ app.include_router(capabilities_router, prefix="/api")
 app.include_router(rbac_router, prefix="/api")
 app.include_router(runtime_router, prefix="/api")
 app.include_router(mock_router,    prefix="/api")
+app.include_router(tenants_router, prefix="/api")
 
 
 @app.get("/")
