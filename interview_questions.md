@@ -1,324 +1,462 @@
-# FlowOS Backend — Senior Software Engineer Interview Questions
+# System Design Interview Questions: Business Rule Evaluability & Runtime Safety
 
-These questions are grounded in the actual architecture and implementation
-decisions made during the FlowOS Multi-Tenant Personal Loan Sourcing Platform
-build. Every question maps to something that was designed, debated, or
-implemented in this codebase.
+## Context
+This session focused on investigating and implementing rule evaluability classification in a banking workflow system that extracts business rules from BRDs (Business Requirements Documents) and evaluates them at runtime.
 
 ---
 
-## Section 1 — Multi-Tenant Architecture
+## Section 1: Problem Understanding & Analysis
 
-**1.**
-We modelled Tenant as a bank and Workspace as a product/knowledge domain inside
-that bank. What are the tradeoffs of this two-level isolation hierarchy compared
-to a single-level tenant model where every bank directly owns all resources?
+### Q1: What were the three critical issues discovered in the rule evaluation system?
 
-**2.**
-The `workspaces` table has a composite unique constraint `UNIQUE(tenant_id, name)`
-instead of a global `UNIQUE(name)`. Explain why. What would break if you kept
-the global uniqueness instead?
-
-**3.**
-`BRDDocument` carries a denormalised `tenant_id` column even though
-`workspace.tenant_id` already implies it. Why was this decision made? What
-query patterns does it enable, and what invariant must the application enforce
-to keep it correct?
-
-**4.**
-When we removed the geographical workspace hierarchy (global / region / zone /
-branch), several RBAC and rule-inheritance components depended on
-`get_ancestor_chain()`. What is the safest migration strategy for removing a
-function that has seven confirmed call sites across different subsystems?
-
-**5.**
-The existing `workspaces` table had a `UNIQUE(name)` constraint. We needed to
-replace it with `UNIQUE(tenant_id, name)` without losing existing data. Walk
-through the exact migration steps in correct order, explaining why each step
-must come before the next.
-
-**6.**
-We have a `Tenant → Workspace → BRDDocument → DocumentVersion → IngestionAttempt`
-ownership chain. A query arrives with a `document_version_id`. What is the
-minimum number of joins required to verify that the version belongs to a
-specific tenant, and how would you optimise this for a hot path?
+**Expected Answer:**
+1. **Non-evaluable rules silently pass** — Description-only rules (e.g., "Applicant must have proof of address") never block applicants because they lack field/operator/value; they're treated as "pass by default"
+2. **Partial rules create gaps in policy enforcement** — Multi-condition rules get partially extracted (e.g., CIBIL extracted but FOIR missed), causing incomplete validation
+3. **No audit distinction between evaluable and non-evaluable** — The system treats "rule couldn't be evaluated" the same as "rule was evaluated and passed," making it impossible to audit what policies were actually enforced
 
 ---
 
-## Section 2 — Database Design and SQLAlchemy
+### Q2: Explain the five categories of business rules identified in the investigation.
 
-**7.**
-The `BRDDocument` model uses a plain `VARCHAR` column with a `CHECK` constraint
-for `ingestion_status` rather than a PostgreSQL native `ENUM` type. What are the
-tradeoffs of each approach in a production system using Alembic for migrations?
+**Expected Answer:**
 
-**8.**
-`DocumentVersion` has two separate unique constraints:
-- `UNIQUE(document_id, version_number)`
-- `UNIQUE(document_id, sha256_hash)`
-
-What is each one protecting against? Could you replace both with a single
-constraint? Why or why not?
-
-**9.**
-The `IngestionAttempt` model uses `attempt_number` as a monotonically increasing
-integer within a version. The service assigns it as `MAX(attempt_number) + 1`.
-What is the race condition here, and how would you fix it without introducing
-a distributed lock?
-
-**10.**
-Explain the difference between `db.flush()` and `db.commit()` in SQLAlchemy.
-In the tenant registration flow, we call `db.flush()` after adding the Tenant
-but before creating the Workspace. Why is this necessary, and what would happen
-if you called `db.commit()` instead at that point?
-
-**11.**
-In `WorkflowKnowledge`, we added a nullable `brd_document_id` FK with
-`ON DELETE SET NULL`. Why nullable? Why `SET NULL` rather than `CASCADE`?
-What does this choice say about the relationship between extraction output
-and its source document?
-
-**12.**
-The `RoleAssignment` model has `UniqueConstraint("user_id", "workspace_id")`.
-`user_id` is nullable (NULL until a real user is assigned). What does PostgreSQL
-do with NULL values in a unique constraint? Does this constraint actually prevent
-duplicate unassigned role shapes in the same workspace?
-
-**13.**
-You need to add a new non-nullable column to a large production table with
-millions of rows. Walk through the safest migration strategy that avoids
-locking the table for an extended period in PostgreSQL.
+| Category | Example | Field/Op/Value | Runtime Behavior (Before Fix) | Risk Level |
+|----------|---------|---|---|---|
+| **EVALUABLE** | "CIBIL >= 700" | Present ✅ | Evaluated deterministically | 🟢 None |
+| **INFORMATIONAL** | "Proof of address required" | All NULL | Logged as "evaluable=false, result=true" → passes | 🔴 Silently unenforced |
+| **PARTIAL** | "Employment >= 2 years" (no field hint) | Some NULL | Falls to non-evaluable → passes | 🔴 Incomplete policy |
+| **UNSUPPORTED** | "CIBIL in range [700,800]" | Has value but operator unknown | `evaluate_condition()` returns False | 🔴 Auto-rejects |
+| **INVALID** | Type mismatch (value="abc" for numeric op) | Present but malformed | Type coercion fails → False | 🔴 False rejections |
 
 ---
 
-## Section 3 — API Design and FastAPI
+### Q3: Walk through a concrete failure scenario: "Applicant must submit 2 years of tax returns."
 
-**14.**
-The `POST /api/tenants` endpoint must atomically create a Tenant and a default
-Workspace. The current implementation commits the Tenant before creating the
-Workspace. Describe exactly what failure scenario this creates, and write the
-corrected pseudocode showing the correct flush/commit ordering.
+**Expected Answer:**
 
-**15.**
-The document upload endpoint `POST /knowledge-ingestion/upload` accepts
-`workspace_id` as a form field. This means any caller can pass any
-`workspace_id` without proving they belong to that tenant. What is the
-attack surface, and what is the minimum change to close it without implementing
-full JWT authentication?
+**Extraction Phase:**
+- LLM output: `rule="Applicant must submit 2 years of tax returns"`, `threshold=None`, `condition=None`
+- Heuristic extraction: `_infer_field()` finds no match (no numeric keyword) → `field=None`
+- `extract_amounts()` finds no monetary threshold → `value=None`
+- Result: `field=None, op=None, value=None`
 
-**16.**
-The `WorkspaceCreate` schema previously had `level`, `parent_id`, and
-`organization_name` fields. After removing the geographical hierarchy, these
-were removed from the schema but the database columns still existed during the
-migration window. How do you safely manage this schema/DB drift in a live
-system where old API clients may still be sending those fields?
+**Persistence Phase:**
+- `BusinessRuleDefinition` created with:
+  - `description="Applicant must submit 2 years of tax returns"`
+  - `field=NULL, op=NULL, value=NULL`
+  - `is_evaluable()=False`
 
-**17.**
-We return HTTP 409 for both duplicate tenant name and duplicate workspace name
-within a tenant. A client receives a 409. What information must the response
-body contain to allow the client to distinguish these two cases
-programmatically, without exposing internal DB constraint names?
-
-**18.**
-The workspace routes file is over 350 lines and handles CRUD, synthesis,
-chain detection, merge suggestions, and BRD generation. What criteria would
-you use to decide whether to split this into multiple routers, and what are
-the tradeoffs of doing so in a FastAPI application?
-
----
-
-## Section 4 — Document Storage and File Handling
-
-**19.**
-The `DocumentRegistrationService` stores PDF bytes via `FileStorageService`
-before writing to the database. If the database commit fails after the file
-is stored, the service calls `_cleanup_storage()` to delete the file. This
-cleanup can also fail. How do you handle this class of problem — where
-two non-atomic systems must be kept consistent — in a production system?
-
-**20.**
-The storage key format is:
+**Runtime Evaluation:**
+```python
+if not rule.is_evaluable():
+    decisions.append({"evaluable": False, "result": True})
+    continue  # ← NEVER BLOCKS
 ```
-{tenant_id}/{workspace_id}/{sha256[:8]}/{uuid4}_{sanitised_filename}
+
+**Consequence:**
+- Applicant with **zero documents** passes the rule ❌
+- Policy is silently not enforced
+- No audit trail distinguishes this from a properly evaluated rule
+
+---
+
+### Q4: What was the root cause of the "Type Mismatch" issue?
+
+**Expected Answer:**
+
+The `evaluate_condition()` function treats type conversion failure as rule failure:
+
+```python
+if op in _NUMERIC_OPS:  # e.g., ">="
+    a = _as_number(actual)        # Tries to convert applicant's value
+    e = _as_number(expected)      # Tries to convert threshold
+    if a is None or e is None:
+        return False  # ← Ambiguous: is it bad data or bad applicant?
+    return a >= e
 ```
-Explain the purpose of each component. What would break if you removed the
-`uuid4` component and stored files only by their SHA-256 hash?
 
-**21.**
-`_validate_file()` checks that the uploaded bytes start with `%PDF`. What is
-the actual security guarantee this provides? What attack does it not prevent?
-What additional validation would you add before the bytes reach the LLM
-extraction pipeline?
+**Problem:** If the extracted value is stored as `"twelve percent"` instead of `12.0`, and the applicant submitted `"12%"`, both conversions fail, and the rule fails — not because the applicant didn't meet the threshold, but because the system couldn't parse the values.
 
-**22.**
-The `FileStorageService.store()` method uses a workspace-scoped key:
-`{workspace_id}/{file_id}_{filename}`. The `DocumentRegistrationService`
-overrides this with a tenant-scoped key that also includes the tenant prefix.
-Why was the existing `FileStorageService` not modified? What principle does
-this reflect?
-
-**23.**
-Two concurrent requests upload the same PDF to the same workspace at exactly
-the same time. Walk through what happens at each stage: validation, hash check,
-storage write, and DB insert. Where does the race condition manifest, and how
-does the current implementation handle it?
+**Impact:** False rejections. A valid applicant is blocked due to format mismatch, not policy violation.
 
 ---
 
-## Section 5 — Extraction Pipeline
+## Section 2: Design & Implementation
 
-**24.**
-The `MultiModalDocumentExtractor.extract()` returns a single merged string.
-We identified that this loses page-level provenance. We added
-`extract_structured()` that returns a 3-tuple without changing `extract()`.
-Why did we not simply change the return type of `extract()`? What principle
-does keeping `extract()` unchanged reflect?
+### Q5: Why was a `String(32)` column chosen for `evaluation_status` instead of a PostgreSQL enum type?
 
-**25.**
-The extraction pipeline runs three threads concurrently:
-- Thread A: pypdf body text
-- Thread B: VisionProvider (table/image pages)
-- Thread C: TextProvider (appendix pages)
+**Expected Answer:**
 
-Thread B fails. What happens to threads A and C? Does the document fail entirely?
-Show the exact code path that handles this.
-
-**26.**
-`PageClassifier` classifies pages using local heuristics — no LLM, no rendering.
-What are the signals it uses? What is the deliberate limitation of this approach,
-and why was it accepted rather than fixed?
-
-**27.**
-The `PdfExtractionPipeline._run_extraction()` calls `PageClassifier.classify()`
-twice — once to get `total_pages` and once inside `extract_structured()`. This
-was noted as acceptable because classification is cheap. What would you change
-if the classification became expensive (e.g. if it called an LLM), without
-changing the public interface of `PdfExtractionPipeline`?
-
-**28.**
-`DocumentExtractionResult.full_text` returns a merged string with `[Page N]`
-markers. This was described as a backward-compatibility bridge for the existing
-`WorkflowExtractor`. What is the correct long-term design, and what is the
-risk of leaving the bridge in place indefinitely?
-
-**29.**
-The `AppendixExtractor` sends all appendix pages as a single combined call to
-the `TextProvider`. Why all pages in one call rather than one call per page?
-What is the failure characteristic — if the TextProvider fails for page 37 of
-a 40-page appendix, what happens to pages 35, 36, 38, 39, 40?
-
-**30.**
-`PageExtractionOutput` has a `source_metadata` field typed as `dict` rather
-than a typed dataclass. What are the tradeoffs of this design? Under what
-conditions would you replace it with a typed schema?
+1. **Backward compatibility:** Nullable string column allows existing rules (created before this field) to have `NULL` values without migration issues
+2. **Application flexibility:** New statuses can be added in application code without a schema migration (just update the enum in Python)
+3. **Consistency with project patterns:** Mirrors existing status fields like `IngestionStatus`, `VersionStatus`, and `AttemptStatus` which use `(str, enum.Enum)` pattern
+4. **CHECK constraint safety:** The CHECK constraint `evaluation_status IS NULL OR evaluation_status IN (...)` enforces valid values at the database level without requiring a PostgreSQL enum type
 
 ---
 
-## Section 6 — Ingestion Lifecycle and State Machines
+### Q6: Explain the five RuleEvaluationStatus enum values and when each would be assigned.
 
-**31.**
-The `VersionStatus` lifecycle is:
+**Expected Answer:**
+
+| Value | Assigned When | Example | Runtime Action |
+|-------|---|---|---|
+| `EVALUABLE` | field, op, value all present and valid | "CIBIL >= 700" | Evaluate deterministically |
+| `INFORMATIONAL` | Policy text exists but no execution condition | "Proof of residence required" | Log for reference, never block |
+| `PARTIAL` | Some components present but not all | "DPD = 0" (no field hint for DPD) | Escalate for manual review |
+| `UNSUPPORTED` | Recognizable pattern but evaluator can't handle it | "CIBIL in range [700, 800]" | Escalate for manual review |
+| `INVALID` | Malformed extraction or contradictions | field="score", op=">=", value="text" | Escalate for manual review |
+
+---
+
+### Q7: Why is the `evaluation_status` field nullable instead of defaulting to a specific value?
+
+**Expected Answer:**
+
+1. **Backward compatibility:** Existing rules created before this field was added have no status value. Setting a default would incorrectly classify legacy rules
+2. **Explicit classification:** Null represents "unknown/legacy" — forcing a choice (e.g., defaulting to EVALUABLE) could silently misclassify a rule
+3. **Migration safety:** Allows the database schema change to be applied without data modifications
+4. **Gradual rollout:** New rules get classified; old rules are left alone until explicitly classified by a backfill process
+
+---
+
+### Q8: Describe the CHECK constraint added to the migration and why it's important.
+
+**Expected Answer:**
+
+```sql
+CHECK (evaluation_status IS NULL OR evaluation_status IN ('EVALUABLE','INFORMATIONAL','PARTIAL','UNSUPPORTED','INVALID'))
 ```
-REGISTERED → PROCESSING → COMPLETED
-                        → FAILED → RETRY_PENDING → PROCESSING
-COMPLETED → RETRY_PENDING → PROCESSING
+
+**Importance:**
+- **Database-level enforcement:** Prevents invalid values from being inserted (e.g., "UNKNOWN" or typos)
+- **Data integrity:** Guarantees that if a record has a non-NULL status, it's one of the 5 valid values
+- **Application safety:** No need to trust application-layer validation; the DB is the source of truth
+- **NULL-safe:** Allows NULL for backward compat with existing records
+
+---
+
+## Section 3: Impact & Architecture
+
+### Q9: How does adding `evaluation_status` fix the "informational rules silently pass" problem?
+
+**Expected Answer:**
+
+**Before:**
+```python
+for rule in inherited:
+    if not rule.is_evaluable():
+        decisions.append({"evaluable": False, "result": True})  # ← Passes
+        continue
 ```
-Draw the complete state machine. Which transitions are valid but not explicitly
-guarded by the application code? What would you add to enforce them?
 
-**32.**
-`IngestionAttempt` rows are never updated after reaching `COMPLETED` or `FAILED`
-— retries create new rows. What is the operational advantage of this design?
-What is the storage cost as retry counts grow? How would you manage it?
+**After:**
+```python
+for rule in inherited:
+    status = rule.evaluation_status  # NEW
+    
+    if status == "INFORMATIONAL":
+        # OK — log for reference
+        decisions.append({"evaluable": False, "result": True, "reason": "informational"})
+    elif status in ("PARTIAL", "UNSUPPORTED", "INVALID"):
+        # Requires review — block
+        failed_rules.append({
+            "rule_id": rule.id,
+            "code": f"REQUIRES_REVIEW:{status}",
+            "message": rule.description,
+        })
+        return RuleEvaluationResult(allowed=False, ...)
+    elif status == "EVALUABLE":
+        # Normal evaluation
+        passed = evaluate_condition(rule.op, actual, rule.value)
+        # ... rest of logic ...
+```
 
-**33.**
-`BRDDocument.ingestion_status` is described as a "denormalised mirror" of
-`DocumentVersion.status`. It was kept for backward compatibility rather than
-removed. Write the SQL query that would detect rows where these two fields
-are inconsistent with each other.
-
-**34.**
-The `AttemptErrorCode` class contains constants like `EMPTY_DOCUMENT`,
-`LLM_TIMEOUT`, `NO_ACTIONS_EXTRACTED`. These are plain string constants on
-a class, not a Python `Enum`. What are the implications of this choice for
-exhaustiveness checking, serialisation, and future refactoring?
-
----
-
-## Section 7 — RBAC and Rule Inheritance
-
-**35.**
-The existing `PermissionChecker.can()` calls `get_ancestor_chain()` which reads
-`workspace.parent_id` and `workspace.level` — both columns that were commented
-out of the ORM model. What happens at runtime when this code executes? Why
-does it not raise `AttributeError` immediately at import time?
-
-**36.**
-`resolve_effective_rules()` collects `BusinessRuleDefinition` rows from all
-ancestor workspaces ordered by chain position. After removing the geographical
-hierarchy, this function becomes a simple single-workspace query. What is the
-correct migration path for this function that does not break callers?
-
-**37.**
-`ROLE_MIN_LEVEL` documents minimum workspace levels for roles like
-`global_admin`, `region_manager`. With the geographical hierarchy removed,
-this mapping is meaningless but still exists in the codebase. What is the
-risk of leaving dead configuration in place, and when is it acceptable to
-defer its removal?
-
-**38.**
-The `_ACTOR_ROLE_MAP` in `rule_extractor.py` maps actor names to roles that
-encode hierarchy levels: `"regional head" → "region_manager"`. With the
-hierarchy gone, these role names still exist. What is your strategy for
-renaming roles in a live system where role names are stored as strings in
-the database?
+**Result:** Only intentional informational rules pass; everything else escalates for review.
 
 ---
 
-## Section 8 — Engineering Process and Architecture
+### Q10: What files are involved in the complete rule lifecycle, and what does each do?
 
-**39.**
-During the investigation phase, we found a "split-brain" state: the SQLAlchemy
-`Workspace` model had the hierarchy columns commented out, but the database
-schema (via migrations) still had them, and all the RBAC code tried to read them.
-How do you detect and prevent this class of drift in a team environment?
+**Expected Answer:**
 
-**40.**
-We discovered that `app/schemas/workspace.py` imports `WORKSPACE_LEVELS` and
-`_PARENT_LEVEL` from `app/models/workspace.py` at module load time, and those
-names no longer exist. This means the entire FastAPI application fails to start.
-How should this class of import-time crash be caught in a CI pipeline before
-it reaches production?
+| Phase | File | Responsibility |
+|-------|------|---|
+| **Extraction** | `app/knowledge_ingestions/schemas.py` | LLM output schema (BusinessRule class) |
+| **Persistence** | `app/knowledge_ingestions/service.py` | Store raw rule in `WorkflowBusinessRule` |
+| **Parsing** | `app/rbac/rule_extractor.py` | Heuristic extraction (field, op, value) + **Classification (NEW)** |
+| **Model** | `app/models/business_rule_definition.py` | Structured rule definition + `evaluation_status` (NEW) |
+| **Runtime** | `app/runtime/rule_engine.py` | Fetch rules + decision logic + **Routing by status (NEW)** |
+| **Evaluation** | `app/execution/rules/evaluator.py` | Condition evaluation (total function, no crashes) |
 
-**41.**
-The investigation identified a typo `qyery` in `WorkflowRepository.search_business_rules()`
-that causes a `NameError` at runtime. This method had presumably been in the
-codebase for some time without being caught. What testing and static analysis
-practices would have caught this before it was found during architecture review?
+---
 
-**42.**
-`EmbeddingMapper.map_actions()` previously fetched all `PENDING` and `UNMAPPED`
-action rows globally — across all workspaces. In a single-tenant system this
-was harmless. In a multi-tenant system it means one tenant's ingestion processes
-another tenant's unmapped rows. How should multi-tenancy concerns be validated
-during code review for a system undergoing a tenancy migration?
+### Q11: What is the contract of `is_evaluable()` and why was it left unchanged?
 
-**43.**
-We made `get_unmapped_actions(workspace_id=None)` backward compatible by
-defaulting to `None` (global query). Is this the right default? Make the
-argument for and against keeping the global fallback, and state which you
-would choose in a production financial platform.
+**Expected Answer:**
 
-**44.**
-The `PdfExtractionPipeline` always returns a `DocumentExtractionResult` and
-never raises. The `DocumentRegistrationService` always raises typed exceptions
-(`InvalidFileError`, `WorkspaceTenantMismatchError`, etc.) and never returns
-error objects. These are two different error-handling philosophies. When is
-each one appropriate, and what is the deciding factor?
+**Contract:**
+```python
+def is_evaluable(self) -> bool:
+    """True if this rule can be evaluated by evaluate_condition at runtime."""
+    return bool(self.field and self.op and self.value is not None)
+```
 
-**45.**
-We built the registration, storage, and extraction layers without yet building
-the migration for the new tables (`brd_documents`, `document_versions`,
-`ingestion_attempts`). What is the risk of this sequencing, and what must be
-true about the new code before it is safe to run in a production environment
-that already has the old schema applied?
+**Why unchanged:**
+1. **Narrow scope:** Only checks if the three components exist and are not None — pure data check
+2. **Distinction from status:** `is_evaluable()` answers "does this rule have the necessary pieces?" whereas `evaluation_status` answers "how should this rule be treated at runtime?"
+3. **No runtime logic:** Adding status classification to `is_evaluable()` would couple data checking with policy decisions
+4. **Backward compat:** Existing callers depend on the current behavior
+
+**Example:**
+- A rule with `field=NULL, op=NULL, value=NULL` is NOT evaluable (`is_evaluable()=False`)
+- Same rule classified as `evaluation_status="INFORMATIONAL"` means "this is policy text for human reference"
+- These are different concerns
+
+---
+
+## Section 4: Testing & Verification
+
+### Q12: Write pseudocode for a test that verifies "Informational rules never block applicants."
+
+**Expected Answer:**
+
+```python
+def test_informational_rule_never_blocks():
+    # Arrange
+    rule = BusinessRuleDefinition(
+        field=None,
+        op=None,
+        value=None,
+        description="Applicant must provide proof of address.",
+        evaluation_status="INFORMATIONAL",  # Explicitly informational
+        active=True,
+    )
+    db.add(rule)
+    db.commit()
+    
+    ctx = RuleEvaluationContext(
+        workspace_id=1,
+        user_id="user123",
+        facts={},  # No address proof provided
+    )
+    
+    # Act
+    engine = RuntimeRuleEngine(db)
+    result = engine.evaluate(ctx)
+    
+    # Assert
+    assert result.allowed == True, "Informational rule should never block"
+    assert len(result.failed_rules) == 0, "No failed rules"
+    assert result.decisions[0]["reason"] == "informational"
+```
+
+---
+
+### Q13: Write pseudocode for a test that verifies "Partial rules escalate for manual review."
+
+**Expected Answer:**
+
+```python
+def test_partial_rule_escalates():
+    # Arrange
+    rule = BusinessRuleDefinition(
+        field=None,  # Not extractable
+        op=None,
+        value=None,
+        description="DPD = 0 for past 12 months",
+        evaluation_status="PARTIAL",  # Recognizable but incomplete
+        active=True,
+    )
+    db.add(rule)
+    db.commit()
+    
+    ctx = RuleEvaluationContext(
+        workspace_id=1,
+        user_id="user456",
+        facts={},
+    )
+    
+    # Act
+    engine = RuntimeRuleEngine(db)
+    result = engine.evaluate(ctx)
+    
+    # Assert
+    assert result.allowed == False, "Partial rules block (escalate)"
+    assert result.failed_rules[0]["code"] == "REQUIRES_REVIEW:PARTIAL"
+    assert "DPD" in result.failed_rules[0]["message"]
+```
+
+---
+
+## Section 5: Trade-offs & Decisions
+
+### Q14: Why not auto-classify all non-evaluable rules as INFORMATIONAL during extraction?
+
+**Expected Answer:**
+
+Because we don't know the intent:
+- Document requirement ("proof of address") → should be INFORMATIONAL
+- Failed extraction ("DPD = 0" with no field hint) → should be PARTIAL (needs human review)
+- Unsupported pattern ("CIBIL in range X..Y") → should be UNSUPPORTED (known limitation)
+
+Auto-classifying all as INFORMATIONAL would hide bugs in extraction and mask policy gaps. Better to require explicit classification by the extraction service or a human reviewer.
+
+---
+
+### Q15: What are the trade-offs of storing status in the DB vs. computing it at runtime?
+
+**Expected Answer:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Store in DB** (chosen) | Immutable audit trail; quick queries by status; explicit intent captured | Extra schema column; requires migration; classification logic must be trusted |
+| **Compute at runtime** | Schema-unchanged; classification logic centralized | Repeated computation; no audit trail; inconsistent if logic changes |
+
+**Decision rationale:** Audit trail is more important than schema simplicity. Banking domain requires immutable records.
+
+---
+
+## Section 6: Future Roadmap
+
+### Q16: What are the next three tasks after this change?
+
+**Expected Answer:**
+
+1. **Create Alembic migration** — Apply the schema change to production database
+2. **Update RuleExtractionService** — Classify each extracted rule (EVALUABLE / INFORMATIONAL / PARTIAL / UNSUPPORTED / INVALID)
+3. **Update RuntimeRuleEngine.evaluate()** — Route non-evaluable rules appropriately (escalate vs. pass)
+
+---
+
+### Q17: How would you implement classification logic in RuleExtractionService?
+
+**Expected Answer:**
+
+```python
+def _classify_rule(self, field, op, value, description):
+    # Check if fully evaluable
+    if field and op and value is not None:
+        # Validate type compatibility
+        if op in [">=", "<=", ">", "<"]:
+            if isinstance(value, (int, float)) or _is_numeric(value):
+                return "EVALUABLE"
+        else:
+            return "EVALUABLE"
+        return "INVALID"  # Type mismatch
+    
+    # Check if informational (pure policy text)
+    if not field and not op and not value:
+        keywords = ["must", "should", "requirement", "policy", "need"]
+        if any(kw in description.lower() for kw in keywords):
+            return "INFORMATIONAL"
+        return "PARTIAL"  # Unclear what failed
+    
+    # Partial extraction (some pieces present)
+    if (field and not op) or (op and not value) or (value and not field):
+        return "PARTIAL"
+    
+    # Known unsupported pattern
+    if op and op not in SUPPORTED_OPERATORS:
+        return "UNSUPPORTED"
+    
+    return None  # Unclassified
+```
+
+---
+
+### Q18: How would the audit trail use `evaluation_status` for compliance reporting?
+
+**Expected Answer:**
+
+```python
+# Compliance report: "Which policies were actually enforced for this applicant?"
+
+def get_enforced_policies(workflow_execution_id):
+    decisions = (
+        db.query(RuleDecision)
+        .filter(RuleDecision.execution_id == workflow_execution_id)
+        .all()
+    )
+    
+    # Evaluated and passed ✅
+    passed = [d for d in decisions if d.rule.evaluation_status == "EVALUABLE" and d.result == True]
+    
+    # Evaluated and failed ❌
+    failed = [d for d in decisions if d.rule.evaluation_status == "EVALUABLE" and d.result == False]
+    
+    # Informational (for reference) 📌
+    info = [d for d in decisions if d.rule.evaluation_status == "INFORMATIONAL"]
+    
+    # Escalated (requires review) ⚠️
+    escalated = [d for d in decisions if d.rule.evaluation_status in ("PARTIAL", "UNSUPPORTED", "INVALID")]
+    
+    return {
+        "passed_rules": len(passed),
+        "failed_rules": len(failed),
+        "informational": len(info),
+        "escalated": len(escalated),
+        "fully_evaluated": len(passed) + len(failed),
+    }
+```
+
+This provides clear audit evidence of what was evaluated vs. what required human review.
+
+---
+
+## Section 7: System Design Principles
+
+### Q19: How does this change reflect the "fail closed" principle in banking systems?
+
+**Expected Answer:**
+
+**Fail Closed Principle:** When in doubt, deny (don't auto-approve).
+
+**Before:** Non-evaluable rules were silently passing applicants (fail open ❌)
+
+**After:** Non-evaluable rules are escalated for manual review or block applicant (fail closed ✅)
+
+This is critical for banking:
+- A document requirement you couldn't evaluate should escalate, not auto-pass
+- An unsupported rule pattern should escalate, not auto-pass
+- Only explicitly classified informational rules auto-pass
+
+---
+
+### Q20: Explain the separation of concerns between extraction, classification, and evaluation.
+
+**Expected Answer:**
+
+| Concern | Responsibility | Input | Output |
+|---------|---|---|---|
+| **Extraction** | Parse unstructured text → structured fields | Raw rule text | field, op, value |
+| **Classification** | Determine how to treat the rule at runtime | field, op, value + description | evaluation_status |
+| **Evaluation** | Execute the rule logic against applicant facts | evaluation_status + facts | allowed/blocked decision |
+
+**Benefits:**
+- Each layer has a single responsibility
+- Classification logic is independent of evaluation logic
+- Extraction can improve without changing evaluation
+- New statuses can be added without modifying evaluation code
+
+---
+
+## Summary Questions
+
+### Q21: In one paragraph, explain what problem this session solved.
+
+**Expected Answer:**
+
+The system was extracting business rules from documents and evaluating them at runtime, but it couldn't distinguish between rules that were fully evaluated vs. rules that couldn't be evaluated. This caused three problems: informational policies were silently unenforced, partial extractions missed policy conditions entirely, and unsupported rules auto-rejected all applicants. We added an `evaluation_status` field to classify each rule's evaluability and runtime behavior (EVALUABLE, INFORMATIONAL, PARTIAL, UNSUPPORTED, INVALID), enabling the runtime engine to escalate unclear rules for manual review instead of silently passing or falsely rejecting applicants.
+
+---
+
+### Q22: What is the most important invariant that `evaluation_status` preserves?
+
+**Expected Answer:**
+
+**Invariant:** "A rule can only block an applicant if its evaluation_status is EVALUABLE and it was deterministically evaluated."
+
+This ensures that:
+- Applicants aren't falsely rejected due to malformed extractions
+- Policies aren't silently ignored due to incomplete information
+- Every block decision is traceable to either a failed condition or an explicit escalation

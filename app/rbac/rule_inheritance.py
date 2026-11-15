@@ -1,27 +1,30 @@
 """
 app/rbac/rule_inheritance.py
 
-RuleInheritanceResolver — collects the effective rule set for a workspace
-by walking the ancestor chain and gathering all active BusinessRuleDefinition
-rows declared at any ancestor level.
+Effective rule resolution for a flat workspace architecture.
 
-Rule ordering: global rules come first, branch rules last.
-  [global_rules, region_rules, zone_rules, branch_rules]
+Architecture note
+-----------------
+Workspaces are flat (Tenant → Workspace, no parent-child hierarchy).
+Each BusinessRuleDefinition is scoped to exactly one workspace via
+`scope_workspace_id`.  Rule inheritance across workspaces does not exist
+in this architecture.
 
-This ordering matters for restriction enforcement: when a step is evaluated,
-global rules apply first. A branch rule can only ADD more restriction, not
-reduce a global rule's threshold.
+`resolve_effective_rules()` therefore returns all active
+BusinessRuleDefinition rows whose `scope_workspace_id` matches the
+requested workspace — no ancestor chain, no cross-workspace lookup.
 
-Restriction enforcement (write-time check):
-  is_more_restrictive(new_rule, inherited_rule) → bool
+`validate_new_rule()` is preserved for call-site compatibility.  With a
+flat architecture there are no ancestor constraints to validate against,
+so it always returns an empty violations list.
 
-  For >= (lower bound): new_value >= inherited_value  (higher = more restrictive)
-  For <= (upper bound): new_value <= inherited_value  (lower = more restrictive)
-  For ==: must match exactly
-  For in: new_set must be a subset of inherited_set
+`is_more_restrictive()` is preserved unchanged — it is a pure function
+used by callers that may compare rules independently of the hierarchy.
 
-If a new rule fails the restriction check against ANY inherited rule for the
-same field+op combination, it is rejected.
+Callers that depended on inherited ordering (global → branch) previously
+received rules in root-first order.  With a flat architecture the concept
+of ordering by level does not apply; rules are returned in ascending `id`
+order (insertion order), which is deterministic and stable.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.business_rule_definition import BusinessRuleDefinition
-from app.rbac.hierarchy import get_ancestor_chain
 
 
 def resolve_effective_rules(
@@ -37,42 +39,34 @@ def resolve_effective_rules(
     db: Session,
     field: str | None = None,
 ) -> list[BusinessRuleDefinition]:
-    """Return the ordered effective rule set for a workspace.
+    """Return all active BusinessRuleDefinition rows for a workspace.
 
-    Collects all active BusinessRuleDefinition rows whose scope_workspace_id
-    is in the ancestor chain of workspace_id (inclusive of workspace_id).
-    Ordered from global to branch.
+    With the flat workspace architecture (no parent-child hierarchy) the
+    effective rule set is exactly the set of rules declared on the
+    workspace itself.  No ancestor chain is walked.
 
     Args:
-        workspace_id: The target workspace.
-        db: SQLAlchemy session.
-        field: If provided, filter to rules for this specific field only.
-               Pass None to get all rules.
+        workspace_id: The workspace whose rules are requested.
+        db:           SQLAlchemy session.
+        field:        Optional field name to filter by.  Pass None to
+                      return all rules for the workspace.
 
     Returns:
-        List of BusinessRuleDefinition ordered from root to leaf.
+        List of active BusinessRuleDefinition rows scoped to workspace_id,
+        ordered by id ascending.  Returns an empty list if the workspace
+        has no active rules or does not exist.
     """
-    chain = get_ancestor_chain(workspace_id, db)
-    if not chain:
-        chain = [workspace_id]
-
     q = (
         db.query(BusinessRuleDefinition)
         .filter(
-            BusinessRuleDefinition.scope_workspace_id.in_(chain),
+            BusinessRuleDefinition.scope_workspace_id == workspace_id,
             BusinessRuleDefinition.active.is_(True),
         )
     )
     if field:
         q = q.filter(BusinessRuleDefinition.field == field)
 
-    all_rules = q.all()
-
-    # Sort by chain position so global rules come first
-    chain_index = {ws_id: idx for idx, ws_id in enumerate(chain)}
-    all_rules.sort(key=lambda r: chain_index.get(r.scope_workspace_id, 999))
-
-    return all_rules
+    return q.order_by(BusinessRuleDefinition.id.asc()).all()
 
 
 def is_more_restrictive(
@@ -96,36 +90,31 @@ def is_more_restrictive(
     if new_rule.get("field") != inherited_rule.get("field"):
         return True   # Different fields — not in conflict
 
-    new_op   = new_rule.get("op")
-    inh_op   = inherited_rule.get("op")
-    new_val  = new_rule.get("value")
-    inh_val  = inherited_rule.get("value")
+    new_op  = new_rule.get("op")
+    inh_op  = inherited_rule.get("op")
+    new_val = new_rule.get("value")
+    inh_val = inherited_rule.get("value")
 
     if new_op != inh_op:
         return True   # Different operators — let the rule engine sort it out
 
     try:
         if new_op in (">=", ">"):
-            # Lower bound — more restrictive means HIGHER threshold
             return float(new_val) >= float(inh_val)
 
         if new_op in ("<=", "<"):
-            # Upper bound — more restrictive means LOWER threshold
             return float(new_val) <= float(inh_val)
 
         if new_op == "==":
-            # Must be identical
             return new_val == inh_val
 
         if new_op == "in":
-            # More restrictive means a SMALLER allowed set
             try:
                 return set(new_val) <= set(inh_val)
             except TypeError:
                 return False
 
         if new_op == "not_in":
-            # More restrictive means a LARGER excluded set
             try:
                 return set(new_val) >= set(inh_val)
             except TypeError:
@@ -144,41 +133,16 @@ def validate_new_rule(
 ) -> list[str]:
     """Check whether a new rule would loosen any inherited constraint.
 
-    Returns a list of violation messages. Empty list = rule is valid.
+    With the flat workspace architecture there is no inheritance hierarchy,
+    so there are no ancestor constraints to validate against.  This function
+    is preserved for call-site compatibility and always returns an empty list.
 
     Args:
         new_rule:     {"field": str, "op": str, "value": any, "description": str}
         workspace_id: The workspace where the rule would be declared.
-        db:           SQLAlchemy session.
+        db:           SQLAlchemy session (unused; retained for signature compat).
+
+    Returns:
+        Always [].  No violations are possible without a hierarchy.
     """
-    field = new_rule.get("field")
-    if not field:
-        return []   # Description-only rule — nothing to validate
-
-    # Only check inherited rules, not the workspace's own rules
-    chain = get_ancestor_chain(workspace_id, db)
-    ancestor_ids = [ws_id for ws_id in chain if ws_id != workspace_id]
-
-    if not ancestor_ids:
-        return []   # global workspace — no inheritance
-
-    inherited = (
-        db.query(BusinessRuleDefinition)
-        .filter(
-            BusinessRuleDefinition.scope_workspace_id.in_(ancestor_ids),
-            BusinessRuleDefinition.field == field,
-            BusinessRuleDefinition.active.is_(True),
-        )
-        .all()
-    )
-
-    violations = []
-    for inh in inherited:
-        inh_dict = {"field": inh.field, "op": inh.op, "value": inh.value}
-        if not is_more_restrictive(new_rule, inh_dict):
-            violations.append(
-                f"Rule '{new_rule.get('description', '')}' "
-                f"relaxes an inherited constraint from workspace {inh.scope_workspace_id}: "
-                f"{inh.description}"
-            )
-    return violations
+    return []

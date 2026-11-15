@@ -76,6 +76,8 @@ class KnowledgeIngestionService:
         workspace_id: int = 1,
         source_document: str | None = None,
         brd_document_id: int | None = None,
+        document_version_id: int | None = None,
+        ingestion_attempt: object | None = None,
     ):
         """Ingest pre-extracted document text without running PDF extraction.
 
@@ -84,24 +86,28 @@ class KnowledgeIngestionService:
         second, redundant call to MultiModalDocumentExtractor.
 
         Args:
-            document_text:   The full extracted text of the document.
-                             Must be a non-empty string.
-            workspace_id:    Owning workspace.  Defaults to 1 for
-                             backward compatibility with legacy callers.
-            source_document: Original filename or document label.
-                             Stored verbatim on the WorkflowKnowledge row.
-            brd_document_id: Optional FK to the BRDDocument row that produced
-                             this text.  When supplied it is written to
-                             WorkflowKnowledge.brd_document_id, completing
-                             the provenance chain:
-                               WorkflowKnowledge → BRDDocument → Workspace → Tenant.
+            document_text:       The full extracted text. Must be non-empty.
+            workspace_id:        Owning workspace.
+            source_document:     Original filename stored on the knowledge row.
+            brd_document_id:     Optional FK to BRDDocument for provenance.
+            document_version_id: Optional FK to DocumentVersion. When supplied,
+                                 a partial UNIQUE index (added in migration
+                                 fix_idempotency_gaps) prevents duplicate rows
+                                 for the same version. If the INSERT hits that
+                                 constraint (IntegrityError), the existing row
+                                 is returned instead.
+            ingestion_attempt:   Optional IngestionAttempt ORM row. When supplied,
+                                 `extracted_knowledge_id` and `status=COMPLETED`
+                                 are written in the SAME commit as WorkflowKnowledge,
+                                 making T5 and T6 a single atomic transaction and
+                                 eliminating the ghost-knowledge crash window.
 
         Returns:
-            Persisted WorkflowKnowledge ORM object (same as ingest()).
+            Persisted WorkflowKnowledge ORM object.
 
         Raises:
-            WorkflowExtractionError: document_text is empty, or the LLM
-                                     extracted zero action references.
+            WorkflowExtractionError: document_text is empty or LLM extracted
+                                     zero action references.
             RepositoryError:         Persistence or mapping failed.
         """
         if not document_text or not document_text.strip():
@@ -110,12 +116,51 @@ class KnowledgeIngestionService:
                 "document_text is empty — cannot extract workflow knowledge."
             )
 
+        # Ghost-knowledge recovery: if a previous crash left a committed
+        # WorkflowKnowledge row for this version (T5 done, T6 not done),
+        # return it instead of creating a duplicate.
+        if document_version_id is not None:
+            existing = self._find_existing_knowledge(document_version_id)
+            if existing is not None:
+                # Link the new attempt to the existing knowledge if supplied,
+                # then return — no new extraction needed.
+                if ingestion_attempt is not None:
+                    self._link_attempt(ingestion_attempt, existing)
+                return existing
+
         return self._ingest_from_extracted_text(
             document_text=document_text,
             workspace_id=workspace_id,
             source_document=source_document,
             brd_document_id=brd_document_id,
+            document_version_id=document_version_id,
+            ingestion_attempt=ingestion_attempt,
         )
+
+    def _find_existing_knowledge(self, document_version_id: int):
+        """Return an existing WorkflowKnowledge row for this version, or None."""
+        from app.models.workflow_knowledge import WorkflowKnowledge
+        return (
+            self.db.query(WorkflowKnowledge)
+            .filter(WorkflowKnowledge.document_version_id == document_version_id)
+            .first()
+        )
+
+    def _link_attempt(self, ingestion_attempt, knowledge) -> None:
+        """Link an attempt to recovered existing knowledge and commit."""
+        from app.models.ingestion_attempt import AttemptStatus
+        from datetime import datetime, timezone
+        try:
+            ingestion_attempt.extracted_knowledge_id = knowledge.id
+            ingestion_attempt.status = AttemptStatus.COMPLETED.value
+            ingestion_attempt.completed_at = datetime.now(timezone.utc)
+            self.db.commit()
+        except Exception as exc:
+            self.db.rollback()
+            from app.knowledge_ingestions.exceptions import RepositoryError
+            raise RepositoryError(
+                f"Failed to link existing knowledge to attempt: {exc}"
+            ) from exc
 
     # ── Shared internal logic ─────────────────────────────────────────────────
 
@@ -125,11 +170,17 @@ class KnowledgeIngestionService:
         workspace_id: int,
         source_document: str | None,
         brd_document_id: int | None,
+        document_version_id: int | None = None,
+        ingestion_attempt: object | None = None,
     ):
         """Extract workflow knowledge from text, persist it, and return the row.
 
-        Called by both ingest() and ingest_from_text().  All transaction,
+        Called by both ingest() and ingest_from_text(). All transaction,
         commit, rollback and error-handling conventions live here exactly once.
+
+        When ingestion_attempt is supplied, its status and
+        extracted_knowledge_id are updated in the SAME commit as
+        WorkflowKnowledge — merging T5 and T6 into one atomic transaction.
         """
         workflow = self.workflow_extractor.extract(document_text)
 
@@ -146,13 +197,23 @@ class KnowledgeIngestionService:
                 workflow,
                 workspace_id=workspace_id,
                 source_document=source_document,
+                brd_document_id=brd_document_id,
             )
 
-            # Populate provenance link when a BRDDocument id is supplied.
-            # The column is nullable so this is a no-op for callers that do
-            # not supply it (e.g. the legacy ingest() path).
+            # Populate provenance links.
             if brd_document_id is not None:
                 knowledge.brd_document_id = brd_document_id
+            if document_version_id is not None:
+                knowledge.document_version_id = document_version_id
+
+            # Merge T5 + T6: update attempt in the same commit so a crash
+            # between the two old commits can no longer produce ghost knowledge.
+            if ingestion_attempt is not None:
+                from app.models.ingestion_attempt import AttemptStatus
+                from datetime import datetime, timezone
+                ingestion_attempt.extracted_knowledge_id = knowledge.id
+                ingestion_attempt.status = AttemptStatus.COMPLETED.value
+                ingestion_attempt.completed_at = datetime.now(timezone.utc)
 
             self.embedding_mapper.map_actions(workspace_id=workspace_id)
             self.embedding_mapper.map_triggers(workspace_id=workspace_id)

@@ -224,3 +224,68 @@ def upload_brds(
         "failed": len(results) - succeeded,
         "results": results,
     }
+
+
+@router.post("/ingest")
+def ingest_brds(
+    files: list[UploadFile] = File(...),
+    tenant_id: int = Form(...),
+    workspace_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Ingest one or more BRD PDFs using the full multi-tenant pipeline.
+
+    This endpoint replaces /upload for multi-tenant deployments.
+
+    Differences from /upload:
+      - Requires tenant_id — workspace ownership is validated.
+      - Stores the original PDF via FileStorageService (never discards bytes).
+      - Tracks each document through BRDDocument → DocumentVersion →
+        IngestionAttempt with full lifecycle status.
+      - Populates WorkflowKnowledge.brd_document_id for provenance.
+      - Handles duplicate uploads idempotently.
+
+    Each file is processed independently — partial batch success is reported.
+    """
+    from app.knowledge_ingestions.ingestion_orchestrator import IngestionOrchestrator
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    orchestrator = IngestionOrchestrator(db=db)
+    results = []
+
+    for file in files:
+        content = file.file.read()
+        result = orchestrator.run(
+            file_bytes=content,
+            original_filename=file.filename or "upload.pdf",
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            mime_type=file.content_type or "application/pdf",
+        )
+        results.append({
+            "filename":             file.filename,
+            "status":               result.overall_status.lower(),
+            "is_duplicate":         result.is_duplicate,
+            "document_id":          result.document_id or None,
+            "document_version_id":  result.document_version_id or None,
+            "ingestion_attempt_id": result.ingestion_attempt_id or None,
+            "knowledge_id":         result.knowledge_id,
+            "warnings":             result.warnings,
+            "error":                result.error_message,
+        })
+
+        # Best-effort auto-merge (same as the legacy /upload path).
+        if result.overall_status in ("COMPLETED", "PARTIAL") and result.knowledge_id:
+            _try_auto_synthesize(workspace_id, file.filename or "")
+
+    succeeded = sum(1 for r in results if r["status"] in ("completed", "partial"))
+    return {
+        "tenant_id":    tenant_id,
+        "workspace_id": workspace_id,
+        "total":        len(results),
+        "succeeded":    succeeded,
+        "failed":       len(results) - succeeded,
+        "results":      results,
+    }

@@ -35,9 +35,13 @@ from sqlalchemy.orm import Session
 from app.models.workflow_business_rule import WorkflowBusinessRule
 from app.models.workflow_actor import WorkflowActor
 from app.models.workflow_knowledge import WorkflowKnowledge
-from app.models.business_rule_definition import BusinessRuleDefinition
+from app.models.business_rule_definition import (
+    BusinessRuleDefinition,
+    RuleEvaluationStatus,
+)
 from app.models.role_assignment import RoleAssignment, VALID_ROLES
 from app.workflow.rule_conflicts import extract_amounts
+from app.execution.rules.evaluator import SUPPORTED_OPERATORS
 from app.core.logger import logger
 
 
@@ -131,6 +135,90 @@ def map_actor_to_role(actor_name: str) -> str:
     return "read_only"
 
 
+def _classify_rule(
+    field: str | None,
+    op: str | None,
+    value,
+    description: str,
+) -> str | None:
+    """Classify a rule by evaluability: EVALUABLE, INFORMATIONAL, PARTIAL,
+    UNSUPPORTED, or INVALID.
+
+    Args:
+        field:       WorkflowContext field name (e.g. "credit_score"). May be None.
+        op:          Comparison operator (e.g. ">="). May be None.
+        value:       Threshold value (numeric, string, or list). May be None.
+        description: Original rule text from BRD.
+
+    Returns:
+        A RuleEvaluationStatus value (string enum), or None for unclassified
+        (should not occur in practice).
+
+    Classification logic:
+      - EVALUABLE: field, op, value all present; op in SUPPORTED_OPERATORS;
+        value is compatible type (for numeric ops, value must be numeric-able).
+      - INFORMATIONAL: field, op, value all NULL; description contains policy
+        keywords ("must", "should", "shall", "requirement", "policy", etc.).
+      - PARTIAL: some components present but not all; not INFORMATIONAL.
+      - UNSUPPORTED: field present but op not in SUPPORTED_OPERATORS.
+      - INVALID: field and op present but value has type mismatch (e.g. op is
+        ">=", but value is non-numeric string).
+    """
+    _INFORMATIONAL_KEYWORDS = (
+        "must", "should", "shall", "requirement", "policy", "mandate",
+        "stipulation", "condition", "guideline", "directive",
+    )
+
+    _NUMERIC_OPERATORS = {">=", ">", "<=", "<"}
+
+    # Count components: how many of (field, op, value) are non-null
+    components_present = sum(
+        1 for x in [field, op, value is not None] if x
+    )
+
+    # All three components present
+    if components_present == 3:
+        # Check operator is supported
+        if op not in SUPPORTED_OPERATORS:
+            return RuleEvaluationStatus.UNSUPPORTED
+
+        # Check value is compatible with operator
+        if op in _NUMERIC_OPERATORS:
+            # Numeric operator: value must be coercible to number
+            if isinstance(value, bool):
+                return RuleEvaluationStatus.INVALID
+            if isinstance(value, str):
+                try:
+                    float(value.strip())
+                except ValueError:
+                    return RuleEvaluationStatus.INVALID
+            elif not isinstance(value, (int, float)):
+                return RuleEvaluationStatus.INVALID
+
+        return RuleEvaluationStatus.EVALUABLE
+
+    # No components present (all three are NULL)
+    if components_present == 0:
+        # Check if description contains informational keywords
+        desc_lower = (description or "").lower()
+        if any(kw in desc_lower for kw in _INFORMATIONAL_KEYWORDS):
+            return RuleEvaluationStatus.INFORMATIONAL
+        # No components and no keywords: still informational as fallback
+        return RuleEvaluationStatus.INFORMATIONAL
+
+    # Some but not all components present
+    if 0 < components_present < 3:
+        # Could be PARTIAL or UNSUPPORTED
+        # UNSUPPORTED if field is present but op is not supported
+        if field is not None and op is not None and op not in SUPPORTED_OPERATORS:
+            return RuleEvaluationStatus.UNSUPPORTED
+        # Otherwise PARTIAL
+        return RuleEvaluationStatus.PARTIAL
+
+    # Defensive: should not reach here, but classify as PARTIAL if it does
+    return RuleEvaluationStatus.PARTIAL
+
+
 class RuleExtractionService:
     """
     Extracts structured BusinessRuleDefinition and RoleAssignment rows
@@ -204,6 +292,191 @@ class RuleExtractionService:
             "roles_skipped": roles_skipped,
         }
 
+    def extract_for_knowledge(
+        self,
+        db: Session,
+        workflow_knowledge_id: int,
+    ) -> dict:
+        """Extract structured BusinessRuleDefinition rows for one WorkflowKnowledge record.
+
+        This is the preferred method for the ingestion pipeline.  It is
+        tighter than extract_for_workspace() in three ways:
+
+        1.  Scope is derived from the persisted WorkflowKnowledge row, not
+            from a caller-supplied workspace_id.  Cross-BRD contamination is
+            structurally impossible.
+
+        2.  Deduplication is by workflow_business_rule_id, not by description
+            text.  Two raw rules from different BRDs with the same wording
+            each produce their own BusinessRuleDefinition with correct
+            individual provenance.  The database partial unique index
+            (uq_one_definition_per_raw_rule) is the final concurrency
+            safeguard.
+
+        3.  Only WorkflowBusinessRule rows whose workflow_knowledge_id
+            matches the requested record are processed.
+
+        Args:
+            db:                     SQLAlchemy session.
+            workflow_knowledge_id:  PK of the WorkflowKnowledge row to process.
+
+        Returns:
+            {
+              "workflow_knowledge_id": int,
+              "workspace_id": int,
+              "rules_created": int,
+              "rules_skipped": int,
+            }
+
+        Raises:
+            ValueError: if workflow_knowledge_id does not exist.
+        """
+        # ── Resolve knowledge record — scope comes from here, not the caller ──
+        knowledge = (
+            db.query(WorkflowKnowledge)
+            .filter(WorkflowKnowledge.id == workflow_knowledge_id)
+            .first()
+        )
+        if knowledge is None:
+            raise ValueError(
+                f"WorkflowKnowledge {workflow_knowledge_id} not found."
+            )
+
+        workspace_id = knowledge.workspace_id
+
+        # ── Fetch only rules belonging to this exact knowledge record ─────────
+        raw_rules = (
+            db.query(WorkflowBusinessRule)
+            .filter(WorkflowBusinessRule.workflow_knowledge_id == knowledge.id)
+            .all()
+        )
+
+        if not raw_rules:
+            logger.info(
+                "rule_extraction_knowledge_no_rules",
+                extra={"extra_data": {
+                    "workflow_knowledge_id": knowledge.id,
+                    "workspace_id": workspace_id,
+                }},
+            )
+            return {
+                "workflow_knowledge_id": knowledge.id,
+                "workspace_id": workspace_id,
+                "rules_created": 0,
+                "rules_skipped": 0,
+            }
+
+        # Collect actors for allowed_roles population
+        actor_rows = (
+            db.query(WorkflowActor)
+            .filter(WorkflowActor.workflow_knowledge_id == knowledge.id)
+            .all()
+        )
+        actor_roles = list({map_actor_to_role(a.name) for a in actor_rows})
+
+        rules_created = 0
+        rules_skipped = 0
+
+        for raw in raw_rules:
+            rule_text = raw.rule or ""
+
+            # ── Idempotency: skip if a definition already links this raw rule ──
+            # Using workflow_business_rule_id as the dedup key preserves
+            # individual provenance even when two raw rules share identical text.
+            existing = (
+                db.query(BusinessRuleDefinition)
+                .filter(
+                    BusinessRuleDefinition.workflow_business_rule_id == raw.id,
+                )
+                .first()
+            )
+            if existing:
+                rules_skipped += 1
+                continue
+
+            amounts = extract_amounts(rule_text)
+            field   = _infer_field(rule_text) if amounts else None
+            op      = _infer_operator(rule_text) if amounts else None
+            value   = amounts[0] if amounts else None
+
+            # Classify rule evaluability
+            evaluation_status = _classify_rule(field, op, value, rule_text)
+
+            # Validate restriction inheritance (logs, never blocks).
+            if field and op and value is not None:
+                try:
+                    from app.rbac.rule_inheritance import validate_new_rule
+                    violations = validate_new_rule(
+                        new_rule={
+                            "field": field, "op": op,
+                            "value": value, "description": rule_text,
+                        },
+                        workspace_id=workspace_id,
+                        db=db,
+                    )
+                    if violations:
+                        logger.warning(
+                            "rule_extraction_restriction_violation",
+                            extra={"extra_data": {
+                                "workflow_knowledge_id": knowledge.id,
+                                "workspace_id": workspace_id,
+                                "rule": rule_text,
+                                "violations": violations,
+                            }},
+                        )
+                except Exception as val_exc:
+                    logger.warning(
+                        "rule_extraction_validation_error",
+                        extra={"extra_data": {"error": str(val_exc)}},
+                    )
+
+            rule_def = BusinessRuleDefinition(
+                scope_workspace_id=workspace_id,
+                source_workflow_knowledge_id=knowledge.id,
+                workflow_business_rule_id=raw.id,
+                field=field,
+                op=op,
+                value=value,
+                description=rule_text,
+                allowed_roles=actor_roles or [],
+                locked=False,
+                active=True,
+                evaluation_status=evaluation_status,
+            )
+            db.add(rule_def)
+            rules_created += 1
+
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.error(
+                "rule_extraction_knowledge_commit_failed",
+                extra={"extra_data": {
+                    "workflow_knowledge_id": knowledge.id,
+                    "workspace_id": workspace_id,
+                    "error": str(exc),
+                }},
+            )
+            raise
+
+        logger.info(
+            "rule_extraction_knowledge_completed",
+            extra={"extra_data": {
+                "workflow_knowledge_id": knowledge.id,
+                "workspace_id": workspace_id,
+                "rules_created": rules_created,
+                "rules_skipped": rules_skipped,
+            }},
+        )
+
+        return {
+            "workflow_knowledge_id": knowledge.id,
+            "workspace_id": workspace_id,
+            "rules_created": rules_created,
+            "rules_skipped": rules_skipped,
+        }
+
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _extract_rules(
@@ -250,6 +523,9 @@ class RuleExtractionService:
             op      = _infer_operator(rule_text) if amounts else None
             value   = amounts[0] if amounts else None
 
+            # Classify rule evaluability
+            evaluation_status = _classify_rule(field, op, value, rule_text)
+
             # Gap 6 fix: validate that the new rule does not relax any inherited
             # constraint before persisting it. Log violations but do not abort —
             # extraction is best-effort; a human admin resolves conflicts later.
@@ -286,6 +562,7 @@ class RuleExtractionService:
                 allowed_roles=actor_roles or [],
                 locked=False,
                 active=True,
+                evaluation_status=evaluation_status,
             )
             db.add(rule_def)
             created += 1

@@ -1,33 +1,6 @@
-"""
-app/models/business_rule_definition.py
-
-Structured business rule extracted from a BRD.
-
-A WorkflowBusinessRule stores the raw text the LLM pulled from a PDF.
-A BusinessRuleDefinition is the parsed, structured form of that text:
-it carries a field name, operator, and threshold value that evaluate_condition
-can evaluate directly.
-
-The `allowed_roles` column lists the roles (extracted from the actor in the
-same BRD sentence) that are the RBAC boundary for this rule. For example:
-
-  BRD text:  "Loan disbursement above ₹5 lakh requires Branch Manager approval"
-  →  field:         "loan_amount"
-  →  op:            ">="
-  →  value:         500000
-  →  description:   "Loan disbursement above ₹5 lakh requires Branch Manager approval"
-  →  allowed_roles: ["branch_manager"]
-
-`scope_workspace_id` determines which level of the hierarchy this rule is
-declared at. Child workspaces inherit all ancestor rules and may only add
-more-restrictive rules on top.
-
-`locked = True` means lower-level workspaces cannot narrow this rule further
-(used for hard global compliance constraints).
-"""
-
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -36,13 +9,43 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+import enum
 
 from app.db.base import Base
 
 
+class RuleEvaluationStatus(str, enum.Enum):
+    """Classification of rule evaluability and runtime behavior.
+
+    Used to distinguish between fully executable rules, informational
+    (non-blocking) rules, partially extracted rules that require review,
+    unsupported rule patterns, and malformed/invalid rules.
+
+    None (NULL in DB) represents legacy/unknown classification — existing
+    rules created before this field was introduced.
+    """
+
+    EVALUABLE = "EVALUABLE"         # field, op, value all present and valid
+    INFORMATIONAL = "INFORMATIONAL" # policy text, no execution condition
+    PARTIAL = "PARTIAL"             # some components missing
+    UNSUPPORTED = "UNSUPPORTED"     # pattern recognized but not evaluable
+    INVALID = "INVALID"             # malformed extraction, contradictions
+
+
+_VALID_EVALUATION_STATUSES = tuple(s.value for s in RuleEvaluationStatus)
+
+
 class BusinessRuleDefinition(Base):
     __tablename__ = "business_rule_definitions"
+
+    __table_args__ = (
+        CheckConstraint(
+            f"evaluation_status IS NULL OR evaluation_status IN {_VALID_EVALUATION_STATUSES}",
+            name="ck_business_rule_evaluation_status",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -60,6 +63,20 @@ class BusinessRuleDefinition(Base):
         Integer,
         ForeignKey("workflow_knowledge.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+    # ── Provenance: raw rule row ───────────────────────────────────────────────
+    # FK to the specific WorkflowBusinessRule row that was parsed to produce
+    # this structured definition.
+    # NULL for definitions created before this column was introduced, or for
+    # manually created rules that have no corresponding raw extraction row.
+    # ON DELETE SET NULL — deleting the raw rule does not destroy the
+    # structured definition; it simply loses the direct provenance link.
+    workflow_business_rule_id = Column(
+        Integer,
+        ForeignKey("workflow_business_rule.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     # The WorkflowContext key this rule reads, e.g. "loan_amount", "credit_score"
@@ -87,6 +104,21 @@ class BusinessRuleDefinition(Base):
 
     active = Column(Boolean, nullable=False, default=True)
 
+    # ── Rule evaluation classification ──────────────────────────────────────────
+    # Classification of whether and how this rule can be evaluated at runtime.
+    # NULL for legacy rules created before this field was introduced.
+    #
+    # EVALUABLE    — field, op, value all present and valid; can be evaluated.
+    # INFORMATIONAL — policy text with no executable condition; reference only.
+    # PARTIAL      — some components missing; requires human review.
+    # UNSUPPORTED  — pattern recognized but not evaluable by the runtime engine.
+    # INVALID      — malformed extraction (e.g. type mismatches, contradictions).
+    evaluation_status = Column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -98,6 +130,16 @@ class BusinessRuleDefinition(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+
+    # Navigation to the raw WorkflowBusinessRule this definition was parsed from.
+    # back_populates matches WorkflowBusinessRule.business_rule_definition.
+    workflow_business_rule = relationship(
+        "WorkflowBusinessRule",
+        back_populates="business_rule_definition",
+        foreign_keys=[workflow_business_rule_id],
     )
 
     def is_evaluable(self) -> bool:

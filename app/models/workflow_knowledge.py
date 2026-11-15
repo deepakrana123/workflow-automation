@@ -34,6 +34,19 @@ class WorkflowKnowledge(Base):
         index=True,
     )
 
+    # FK to the specific DocumentVersion that produced this knowledge row.
+    # Together with brd_document_id this gives unambiguous provenance.
+    # Enforced UNIQUE by a partial index in the DB (see migration):
+    #   UNIQUE (document_version_id) WHERE document_version_id IS NOT NULL
+    # This prevents a retry from creating a second WorkflowKnowledge row
+    # for the same version — the INSERT will raise IntegrityError instead.
+    document_version_id = Column(
+        Integer,
+        ForeignKey("document_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -52,11 +65,15 @@ class WorkflowKnowledge(Base):
     )
 
     # Soft navigation to the source BRDDocument.
-    # No back_populates on BRDDocument — the reverse list is on
-    # IngestionAttempt.extracted_knowledge, not here.
     brd_document = relationship(
         "BRDDocument",
         foreign_keys=[brd_document_id],
+    )
+
+    # Soft navigation to the specific DocumentVersion that produced this row.
+    document_version = relationship(
+        "DocumentVersion",
+        foreign_keys=[document_version_id],
     )
 
     actions = relationship(

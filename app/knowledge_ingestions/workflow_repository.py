@@ -19,12 +19,15 @@ class WorkflowRepository:
         workflow: WorkflowExtraction,
         workspace_id: int | None = None,
         source_document: str | None = None,
+        document_version_id: int | None = None,
+        brd_document_id: int | None = None,
     ):
         knowledge = WorkflowKnowledge(
             workflow_name=workflow.workflow_name,
             summary=workflow.summary,
             workspace_id=workspace_id,
             source_document=source_document,
+            document_version_id=document_version_id,
         )
 
         self.db.add(knowledge)
@@ -60,14 +63,6 @@ class WorkflowRepository:
                 )
             )
 
-        # for rule in workflow.business_rules:
-        #     self.db.add(
-        #         WorkflowBusinessRule(
-        #             workflow_knowledge_id=knowledge.id,
-        #             rule=rule.rule,
-        #         )
-        #     )
-        
         for rule in workflow.business_rules:
             self.db.add(
                 WorkflowBusinessRule(
@@ -77,8 +72,11 @@ class WorkflowRepository:
                     outcome=rule.outcome,
                     responsible_role=rule.responsible_role,
                     threshold=rule.threshold,
+                    # Populate provenance when available; NULL for legacy/manual paths.
+                    source_brd_document_id=brd_document_id,
                 )
             )
+
         for actor in workflow.actors:
             self.db.add(
                 WorkflowActor(
