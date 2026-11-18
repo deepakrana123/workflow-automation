@@ -1,0 +1,140 @@
+{
+  "workflow_name": "BANK ALPHA PERSONAL LOAN PROGRAM",
+  "summary": "The document outlines the eligibility criteria and terms for the Bank Alpha Personal Loan Program, covering applicant demographics, credit assessment, income verification, loan amount limits, interest rate determination, employment documentation requirements for salaried applicants, and acceptable collateral options.",
+  "triggers": [],
+  "action_references": [
+    {
+      "name": "Perform Credit Evaluation",
+      "description": "Applicants undergo a comprehensive credit evaluation to assess their creditworthiness.",
+      "applicable_rules": [
+        "Minimum CIBIL credit score required: 650",
+        "Credit score evaluation is mandatory for all loan amounts"
+      ],
+      "responsible_actors": []
+    },
+    {
+      "name": "Perform Income Verification",
+      "description": "Applicants must demonstrate stable and verifiable income, with verification conducted through payroll records.",
+      "applicable_rules": [
+        "Monthly salary must exceed ₹25,000",
+        "Income verification through payroll records required"
+      ],
+      "responsible_actors": []
+    },
+    {
+      "name": "Determine Interest Rates",
+      "description": "Interest rates are determined based on the applicant's credit profile, adhering to specified RBI guidelines and internal policy mandates.",
+      "applicable_rules": [
+        "Applicable interest rates range from 9.5% to 15% per annum",
+        "Rates are set per RBI guidelines and internal policy mandate"
+      ],
+      "responsible_actors": []
+    }
+  ],
+  "business_rules": [
+    {
+      "rule": "Applicant age must be between 21 and 65 years (inclusive)",
+      "condition": "Applicant's age",
+      "outcome": "Eligibility for Personal Loan Program",
+      "responsible_role": "",
+      "threshold": "21-65 years"
+    },
+    {
+      "rule": "Self-employed and salaried professionals are eligible for the Personal Loan Program",
+      "condition": "Applicant's employment status",
+      "outcome": "Eligibility for Personal Loan Program",
+      "responsible_role": "",
+      "threshold": ""
+    },
+    {
+      "rule": "Minimum CIBIL credit score required: 650",
+      "condition": "Applicant's CIBIL credit score",
+      "outcome": "Eligibility for Personal Loan Program",
+      "responsible_role": "",
+      "threshold": "650"
+    },
+    {
+      "rule": "Credit score evaluation is mandatory for all loan amounts",
+      "condition": "Loan application",
+      "outcome": "Credit evaluation must be performed",
+      "responsible_role": "",
+      "threshold": ""
+    },
+    {
+      "rule": "Monthly salary must exceed ₹25,000",
+      "condition": "Applicant's monthly salary",
+      "outcome": "Eligibility for Personal Loan Program",
+      "responsible_role": "",
+      "threshold": "₹25,000"
+    },
+    {
+      "rule": "Income verification through payroll records is required",
+      "condition": "Applicant's income verification",
+      "outcome": "Payroll records must be used for verification",
+      "responsible_role": "",
+      "threshold": ""
+    },
+    {
+      "rule": "Minimum loan amount: ₹50,000",
+      "condition": "Requested loan amount",
+      "outcome": "Loan amount must be at least ₹50,000",
+      "responsible_role": "",
+      "threshold": "₹50,000"
+    },
+    {
+      "rule": "Maximum loan amount: ₹25,00,000",
+      "condition": "Requested loan amount",
+      "outcome": "Loan amount cannot exceed ₹25,00,000",
+      "responsible_role": "",
+      "threshold": "₹25,00,000"
+    },
+    {
+      "rule": "Applicable interest rates range from 9.5% to 15% per annum",
+      "condition": "Applicant's credit profile",
+      "outcome": "Interest rate determination within specified range",
+      "responsible_role": "",
+      "threshold": "9.5% to 15%"
+    },
+    {
+      "rule": "Interest rates are set per RBI guidelines and internal policy mandate",
+      "condition": "Interest rate determination",
+      "outcome": "Adherence to RBI guidelines and internal policy",
+      "responsible_role": "",
+      "threshold": ""
+    },
+    {
+      "rule": "Minimum 2 years of employment history is mandatory for salaried applicants",
+      "condition": "Salaried applicant's employment history",
+      "outcome": "Eligibility for Personal Loan Program",
+      "responsible_role": "",
+      "threshold": "2 years"
+    },
+    {
+      "rule": "Salaried applicants must provide Salary slips, Offer letter, Form 16",
+      "condition": "Salaried applicant",
+      "outcome": "Required documentation for application",
+      "responsible_role": "",
+      "threshold": ""
+    },
+    {
+      "rule": "Acceptable collateral for personal loans (if optionally backed) includes fixed deposits, securities, or property",
+      "condition": "Personal loan with optional collateral backing",
+      "outcome": "Definition of acceptable collateral types",
+      "responsible_role": "",
+      "threshold": ""
+    }
+  ],
+  "actors": [
+    {
+      "name": "Applicant",
+      "role": "Loan Program Participant"
+    }
+  ],
+  "external_systems": [
+    {
+      "name": "CIBIL",
+      "description": "External credit bureau providing credit score information for applicant evaluation."
+    }
+  ],
+  "assumptions": []
+}

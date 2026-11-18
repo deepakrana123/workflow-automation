@@ -342,8 +342,17 @@ def compute_overall_status(pages: list[PageExtractionOutput]) -> str:
     Rules:
       EMPTY   — no pages at all, or all pages are SKIPPED/EMPTY with no content.
       FAILED  — no page produced usable content (all FAILED or SKIPPED).
-      PARTIAL — at least one page failed but at least one succeeded.
+      PARTIAL — at least one page failed but at least one succeeded, OR
+                all pages failed but all have usable fallback text.
       SUCCESS — all pages are SUCCESS (or EMPTY/SKIPPED, which are non-errors).
+    
+    Fallback logic:
+      When a page has status=FAILED but has_content=True, it means extraction
+      failed (e.g., vision provider error) but usable text was recovered from
+      fallback (e.g., pypdf raw text). This is a degraded extraction, not a
+      complete failure. If ALL pages are in this state, overall status is
+      PARTIAL (document succeeded with quality degradation), not FAILED
+      (document cannot be processed).
     """
     if not pages:
         return "EMPTY"
@@ -359,6 +368,12 @@ def compute_overall_status(pages: list[PageExtractionOutput]) -> str:
         return "SUCCESS"
 
     if succeeded > 0:
+        return "PARTIAL"
+
+    # All pages failed, but check if they have usable fallback content
+    failed_with_content = sum(1 for p in pages if p.status == PageStatus.FAILED and p.has_content)
+    if failed_with_content == len(pages):
+        # All failed pages have fallback text (e.g., vision failed but pypdf worked)
         return "PARTIAL"
 
     return "FAILED"

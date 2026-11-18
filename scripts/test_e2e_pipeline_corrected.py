@@ -388,7 +388,7 @@ def verify_persistence(bank_name: str, tenant_id: int, doc_id: int, version_id: 
             if not knowledge:
                 results.add_fail("WorkflowKnowledge lookup", f"No knowledge found with id={knowledge_id}")
                 return False
-            results.add_pass("WorkflowKnowledge lookup", f"Found: {knowledge.description[:50]}")
+            results.add_pass("WorkflowKnowledge lookup", f"Found: {knowledge.workflow_name}")
             
             # Check raw rules (WorkflowBusinessRule)
             raw_rules = db.query(WorkflowBusinessRule).filter(
@@ -575,7 +575,7 @@ def provision_test_tenants_and_workspaces() -> dict:
         db.add(alpha_tenant)
         db.flush()
         alpha_tenant_id = alpha_tenant.id
-        print(f"✓ Created Bank Alpha tenant: ID={alpha_tenant_id}, name={alpha_name}")
+        print(f"[OK] Created Bank Alpha tenant: ID={alpha_tenant_id}, name={alpha_name}")
         
         # Create Bank Alpha workspace
         alpha_workspace = Workspace(

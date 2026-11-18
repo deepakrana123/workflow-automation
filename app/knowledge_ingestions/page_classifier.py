@@ -55,11 +55,18 @@ from pypdf import PdfReader
 # A page with images and fewer than this many text characters is "image"
 IMAGE_TEXT_THRESHOLD = 150
 
-# A page with at least this ratio of numeric lines is likely a table
-TABLE_NUMERIC_LINE_RATIO = 0.35
+# A page with at least this ratio of numeric lines is likely a table.
+# Increased from 35% to 70% to distinguish genuine data grids (many numeric cells)
+# from narrative PDFs with section numbers and thresholds. Real financial tables
+# typically have 70%+ numeric content, while policy PDFs have 50-60% due to
+# numbered sections and numeric examples.
+TABLE_NUMERIC_LINE_RATIO = 0.70
 
-# Minimum number of short lines (< 60 chars) to flag as potential table layout
-TABLE_SHORT_LINE_COUNT = 6
+# Minimum number of short lines (< 60 chars) to flag as potential table layout.
+# Increased from 6 to 20 to require much denser structure. This prevents
+# bullet-point narratives from being misclassified as tables. Real tables
+# typically have many more cell-like lines.
+TABLE_SHORT_LINE_COUNT = 20
 
 # For currency-based table detection we additionally require that the page
 # has a compact, line-structured layout. A prose narrative can legitimately
