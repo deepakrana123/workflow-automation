@@ -30,6 +30,8 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 
 from app.execution.rules.evaluator import evaluate_condition
+from app.rbac.rule_extractor import _classify_rule
+from app.models.business_rule_definition import RuleEvaluationStatus
 from app.core.logger import logger
 
 
@@ -40,7 +42,9 @@ class RuleEvalEntry(NamedTuple):
     value: Any
     actual: Any
     result: bool
+    classification: str       # EVALUABLE, INFORMATIONAL, PARTIAL, etc.
     scope_workspace_id: int | None
+    evaluable: bool           # True if classification == EVALUABLE
 
 
 class EvalResult(NamedTuple):
@@ -60,7 +64,11 @@ def evaluate_step_rules(
       1. Inherited rules (global → branch, already ordered by resolver)
       2. Step-embedded rules from step_definition["business_rules"]
 
-    First failing rule halts evaluation and triggers RULE_BLOCKED.
+    Classification-based routing:
+      - EVALUABLE rules → evaluated with evaluate_condition()
+      - Non-evaluable rules → flagged for review, evaluation halts
+      - First failing EVALUABLE rule → halts evaluation (RULE_BLOCKED status)
+      - Any non-evaluable rule → halts evaluation (REVIEW_REQUIRED status)
 
     Args:
         step_definition:  The compiled step dict from parsed_rule_json.
@@ -80,7 +88,18 @@ def evaluate_step_rules(
     for rule in (inherited_rules or []):
         entry = _eval_one_rule(rule, context_outputs)
         evaluations.append(entry)
+        
+        if not entry.evaluable:
+            # Non-evaluable rule — halt immediately, require review
+            _log_block(step_definition, entry)
+            return EvalResult(
+                passed=False,
+                blocking_rule=entry,
+                evaluations=evaluations,
+            )
+        
         if not entry.result:
+            # Evaluable rule failed — halt immediately
             _log_block(step_definition, entry)
             return EvalResult(
                 passed=False,
@@ -93,7 +112,18 @@ def evaluate_step_rules(
     for rule in step_rules:
         entry = _eval_one_rule(rule, context_outputs)
         evaluations.append(entry)
+        
+        if not entry.evaluable:
+            # Non-evaluable rule — halt immediately, require review
+            _log_block(step_definition, entry)
+            return EvalResult(
+                passed=False,
+                blocking_rule=entry,
+                evaluations=evaluations,
+            )
+        
         if not entry.result:
+            # Evaluable rule failed — halt immediately
             _log_block(step_definition, entry)
             return EvalResult(
                 passed=False,
@@ -105,7 +135,7 @@ def evaluate_step_rules(
 
 
 def _eval_one_rule(rule: dict, context_outputs: dict) -> RuleEvalEntry:
-    """Evaluate a single rule dict against context_outputs."""
+    """Evaluate a single rule dict against context_outputs using classification."""
     field       = rule.get("field")
     op          = rule.get("op")
     value       = rule.get("value")
@@ -114,12 +144,18 @@ def _eval_one_rule(rule: dict, context_outputs: dict) -> RuleEvalEntry:
 
     actual = context_outputs.get(field) if field else None
 
-    # evaluate_condition is total — never raises
-    if field and op and value is not None:
+    # Classify the rule
+    classification = _classify_rule(field, op, value, description)
+    
+    # Only EVALUABLE rules are evaluated; others default to result=False
+    if classification == RuleEvaluationStatus.EVALUABLE:
+        # evaluate_condition is total — never raises
         passed = evaluate_condition(op, actual, value)
+        evaluable = True
     else:
-        # Description-only rule — no structured condition, always passes
-        passed = True
+        # Non-evaluable: don't call evaluate_condition, result=False to halt
+        passed = False
+        evaluable = False
 
     return RuleEvalEntry(
         rule_description=description,
@@ -128,7 +164,9 @@ def _eval_one_rule(rule: dict, context_outputs: dict) -> RuleEvalEntry:
         value=value,
         actual=actual,
         result=passed,
+        classification=classification,
         scope_workspace_id=scope_ws,
+        evaluable=evaluable,
     )
 
 
@@ -157,11 +195,13 @@ def build_metadata_entry(eval_result: EvalResult) -> dict:
         "failed_count": sum(1 for e in eval_result.evaluations if not e.result),
         "blocking_rule": (
             {
-                "description":       eval_result.blocking_rule.rule_description,
-                "field":             eval_result.blocking_rule.field,
-                "op":                eval_result.blocking_rule.op,
-                "value":             eval_result.blocking_rule.value,
-                "actual":            eval_result.blocking_rule.actual,
+                "description":    eval_result.blocking_rule.rule_description,
+                "field":          eval_result.blocking_rule.field,
+                "op":             eval_result.blocking_rule.op,
+                "value":          eval_result.blocking_rule.value,
+                "actual":         eval_result.blocking_rule.actual,
+                "classification": eval_result.blocking_rule.classification,
+                "evaluable":      eval_result.blocking_rule.evaluable,
                 "scope_workspace_id": eval_result.blocking_rule.scope_workspace_id,
             }
             if eval_result.blocking_rule
@@ -169,12 +209,14 @@ def build_metadata_entry(eval_result: EvalResult) -> dict:
         ),
         "evaluations": [
             {
-                "description": e.rule_description,
-                "field":       e.field,
-                "op":          e.op,
-                "value":       e.value,
-                "actual":      e.actual,
-                "result":      e.result,
+                "description":    e.rule_description,
+                "field":          e.field,
+                "op":             e.op,
+                "value":          e.value,
+                "actual":         e.actual,
+                "result":         e.result,
+                "classification": e.classification,
+                "evaluable":      e.evaluable,
                 "scope_workspace_id": e.scope_workspace_id,
             }
             for e in eval_result.evaluations

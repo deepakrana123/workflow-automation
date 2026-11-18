@@ -260,14 +260,14 @@ def execute_action(
     if resp.authorization and not resp.authorization.allowed:
         raise HTTPException(status_code=403, detail=resp.error or "Authorization denied")
     if resp.rules and not resp.rules.get("allowed"):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message":      "Rule engine blocked execution",
-                "failed_rules": resp.rules.get("failed_rules", []),
-                "warnings":     resp.rules.get("warnings", []),
-            },
-        )
+        status_code = 422  # Unprocessable Entity for both FAIL and REVIEW_REQUIRED
+        detail = {
+            "message":       "Rule engine evaluation failed",
+            "status":        resp.rules.get("status", "UNKNOWN"),
+            "failed_rules":  resp.rules.get("failed_rules", []),
+            "warnings":      resp.rules.get("warnings", []),
+        }
+        raise HTTPException(status_code=status_code, detail=detail)
 
     return resp.to_dict()
 

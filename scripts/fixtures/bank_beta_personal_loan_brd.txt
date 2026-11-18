@@ -1,0 +1,126 @@
+BANK BETA ADAPTIVE PERSONAL LOAN SOLUTION
+==========================================
+
+Eligibility Matrix & Product Terms
+Version 2.0 | Effective Date: 2026-02-01
+
+---
+
+1. APPLICANT AGE & RESIDENCY
+
+The Adaptive Personal Loan Solution is available to eligible residents with the following criteria:
+- Applicant age must be between 25 and 60 years (inclusive)
+- Valid Indian residency and permanent address required
+- Age verification through government-issued ID mandatory
+- Joint applications with spouse or family members allowed with co-applicant income
+
+---
+
+2. CREDIT PROFILE ASSESSMENT
+
+Bank Beta employs enhanced credit evaluation standards:
+- Minimum CIBIL credit score requirement: 700
+- Credit score of 700+ qualifies for standard rates and full loan amount
+- Credit scores between 650-699 may qualify with higher interest rates
+- Credit scores below 650 subject to additional collateral requirements
+
+---
+
+3. INCOME REQUIREMENTS
+
+Applicants must demonstrate strong income stability:
+- Annual income must be at least ₹3,00,000 (three lakhs rupees)
+- Monthly equivalent: Minimum ₹25,000 per month
+- Income documentation: Last 2 years ITR, recent bank statements, payroll records
+- Self-employed applicants require audited financial statements
+
+---
+
+4. LOAN PRODUCT LIMITS
+
+Adaptive loan structuring with flexible limits:
+- Minimum loan amount: ₹1,00,000 (one lakh rupees)
+- Maximum loan amount: ₹50,00,000 (fifty lakhs rupees)
+- Loan amounts scaled based on income, credit score, and existing liabilities
+- Tenure flexibility available from 12 to 84 months
+
+---
+
+5. EMI-TO-INCOME RATIO CONSTRAINT
+
+Bank Beta enforces strict debt-to-income limitations:
+- EMI amount must not exceed 40% of monthly salary
+- Total existing EMI plus new EMI should not exceed 50% of net monthly income
+- Liability assessment conducted per RBI debt-to-income standards
+- Floating rate products subject to additional margin buffer
+
+---
+
+6. PROCESSING FEE STRUCTURE
+
+Transparent fee framework based on credit profile:
+- Processing fee ranges from 0.5% to 1.5% of loan amount
+- Fees charged upfront and debited from disbursement amount
+- Fee structure: 0.5% for credit score 750+, 1.0% for 700-749, 1.5% for below 700
+- Loan mandate guidelines govern fee calculation and applicability
+
+---
+
+7. JOINT APPLICATIONS & CO-APPLICANTS
+
+Enhanced eligibility through joint application structure:
+- Co-applicants with independent income improve eligibility significantly
+- Joint applications require co-applicant's full documentation and credit evaluation
+- Combined income and co-applicant's income considered for loan eligibility
+- Co-applicant must meet minimum age requirement of 25 years
+
+---
+
+8. LOAN TENURE OPTIONS
+
+Flexible repayment periods accommodate diverse financial planning:
+- Available tenure periods: 12, 24, 36, 48, 60, 72, 84 months
+- Monthly installment calculated using reducing balance method
+- Prepayment allowed without penalty after 12-month lock-in period
+- Tenure selection impacts interest rate and total repayment amount
+
+---
+
+9. EXISTING LIABILITIES ASSESSMENT
+
+Comprehensive evaluation of current financial obligations:
+- Existing loan EMI amounts must be verified from credit bureau
+- Total debt-to-income ratio calculated per RBI prescriptive guidelines
+- Applicants with high existing liabilities may qualify for reduced loan amounts
+- Refinancing of existing loans may be considered in specific circumstances
+
+---
+
+10. DOCUMENTATION & VERIFICATION
+
+Complete documentation required for all applicants:
+- KYC documents: Aadhaar, PAN, Passport or Voter ID
+- Address proof: Utility bill, bank statement, or rental agreement
+- Income proof: Last 2 years ITR, recent bank statements, salary slips
+- Employment verification conducted with employer or business registration authority
+
+---
+
+CORPORATE PROGRAMS
+
+Bank Beta offers specialized programs for corporate sector:
+- Salaried employees of registered corporations may access expedited approval
+- Corporate tie-up agreements enable pre-approved loan products
+- Employee referral programs with reduced processing timelines
+- Group discount rates available for large corporate employee bases
+
+---
+
+POLICY STATEMENT
+
+The Adaptive Personal Loan Solution adheres to Bank Beta's lending policies,
+RBI Prudential Framework guidelines, and applicable financial regulations. All applicants
+must comply with Extended KYC and AML verification requirements. The bank reserves
+discretionary authority to approve or decline applications based on credit assessment.
+
+Document Reference: BAPL-ADAPTIVE-2026-V2.0

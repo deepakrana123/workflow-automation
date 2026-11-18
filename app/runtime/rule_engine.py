@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 
 from app.rbac.rule_inheritance import resolve_effective_rules
 from app.execution.rules.evaluator import evaluate_condition
+from app.rbac.rule_extractor import _classify_rule
+from app.models.business_rule_definition import RuleEvaluationStatus
 from app.models.workflow import Workflow
 from app.runtime.context import RuleEvaluationContext, RuleEvaluationResult
 from app.core.logger import logger
@@ -45,11 +47,18 @@ class RuntimeRuleEngine:
           1. Workspace-inherited rules (global → branch)
           2. Step-embedded rules from the DAG definition
 
-        Returns RuleEvaluationResult — never raises.
+        Classification-based routing:
+          - EVALUABLE rules → passed to evaluate_condition()
+          - INFORMATIONAL, PARTIAL, UNSUPPORTED, INVALID → flagged for review
+          - At least one non-evaluable rule → result.status = REVIEW_REQUIRED
+
+        Returns RuleEvaluationResult with status field.
         """
         decisions: list[dict] = []
         failed_rules: list[dict] = []
         warnings: list[str] = []
+        has_non_evaluable = False
+        has_evaluable_failure = False
 
         try:
             # ── Layer 1: Inherited workspace rules ────────────────────────────
@@ -57,58 +66,91 @@ class RuntimeRuleEngine:
             facts = {**ctx.previous_step_outputs, **ctx.request_data}
 
             for rule in inherited:
-                if not rule.is_evaluable():
-                    # Description-only rule — non-blocking, add as info
-                    decisions.append({
-                        "rule_id":     rule.id,
-                        "description": rule.description,
-                        "field":       None,
-                        "evaluable":   False,
-                        "result":      True,
-                        "scope":       rule.scope_workspace_id,
-                    })
-                    continue
+                # Classify the rule by evaluability
+                classification = _classify_rule(rule.field, rule.op, rule.value, rule.description)
 
-                actual = facts.get(rule.field)
-                passed = evaluate_condition(rule.op, actual, rule.value)
+                if classification == RuleEvaluationStatus.EVALUABLE:
+                    # EVALUABLE: evaluate the condition
+                    actual = facts.get(rule.field)
+                    passed = evaluate_condition(rule.op, actual, rule.value)
 
-                entry = {
-                    "rule_id":     rule.id,
-                    "description": rule.description,
-                    "field":       rule.field,
-                    "op":          rule.op,
-                    "value":       rule.value,
-                    "actual":      actual,
-                    "result":      passed,
-                    "scope":       rule.scope_workspace_id,
-                    "evaluable":   True,
-                }
-                decisions.append(entry)
+                    entry = {
+                        "rule_id":        rule.id,
+                        "description":    rule.description,
+                        "field":          rule.field,
+                        "op":             rule.op,
+                        "value":          rule.value,
+                        "actual":         actual,
+                        "result":         passed,
+                        "scope":          rule.scope_workspace_id,
+                        "evaluable":      True,
+                        "classification": "EVALUABLE",
+                    }
+                    decisions.append(entry)
 
-                if not passed:
+                    if not passed:
+                        has_evaluable_failure = True
+                        failed_rules.append({
+                            "rule_id": rule.id,
+                            "code":    f"RULE_FAILED:{rule.field}:{rule.op}",
+                            "message": rule.description,
+                            "classification": "EVALUABLE",
+                        })
+                        logger.info(
+                            "runtime_rule_engine_block",
+                            extra={"extra_data": {
+                                "user_id":         ctx.user_id,
+                                "workspace_id":    ctx.workspace_id,
+                                "rule_id":         rule.id,
+                                "classification":  "EVALUABLE",
+                                "field":           rule.field,
+                                "op":              rule.op,
+                                "value":           rule.value,
+                                "actual":          actual,
+                            }},
+                        )
+                        # FAIL takes precedence — halt immediately
+                        return RuleEvaluationResult(
+                            allowed=False,
+                            status="FAIL",
+                            decisions=decisions,
+                            failed_rules=failed_rules,
+                            warnings=warnings,
+                        )
+                else:
+                    # Non-evaluable (INFORMATIONAL, PARTIAL, UNSUPPORTED, INVALID)
+                    has_non_evaluable = True
+                    entry = {
+                        "rule_id":        rule.id,
+                        "description":    rule.description,
+                        "field":          rule.field,
+                        "op":             rule.op,
+                        "value":          rule.value,
+                        "scope":          rule.scope_workspace_id,
+                        "evaluable":      False,
+                        "classification": classification,
+                    }
+                    decisions.append(entry)
                     failed_rules.append({
-                        "rule_id": rule.id,
-                        "code":    f"RULE_FAILED:{rule.field}:{rule.op}",
-                        "message": rule.description,
+                        "rule_id":        rule.id,
+                        "code":           f"RULE_NON_EVALUABLE:{classification}",
+                        "message":        rule.description,
+                        "classification": classification,
                     })
+                    warnings.append(
+                        f"Rule {rule.id} ({classification}): {rule.description} requires manual review"
+                    )
                     logger.info(
-                        "runtime_rule_engine_block",
+                        "runtime_rule_engine_non_evaluable",
                         extra={"extra_data": {
-                            "user_id":      ctx.user_id,
-                            "workspace_id": ctx.workspace_id,
-                            "rule_id":      rule.id,
-                            "field":        rule.field,
-                            "op":           rule.op,
-                            "value":        rule.value,
-                            "actual":       actual,
+                            "user_id":         ctx.user_id,
+                            "workspace_id":    ctx.workspace_id,
+                            "rule_id":         rule.id,
+                            "classification":  classification,
+                            "description":     rule.description,
                         }},
                     )
-                    return RuleEvaluationResult(
-                        allowed=False,
-                        decisions=decisions,
-                        failed_rules=failed_rules,
-                        warnings=warnings,
-                    )
+                    # Continue — don't halt; collect all non-evaluable rules
 
             # ── Layer 2: Step-embedded rules from DAG ─────────────────────────
             if ctx.step_id and ctx.workflow_id:
@@ -119,40 +161,64 @@ class RuntimeRuleEngine:
                     value = rule.get("value")
                     desc  = rule.get("description", "")
 
-                    if not (field and op and value is not None):
-                        decisions.append({
-                            "description": desc,
-                            "evaluable":   False,
-                            "result":      True,
-                        })
-                        continue
+                    # Classify the step rule
+                    classification = _classify_rule(field, op, value, desc)
 
-                    actual = facts.get(field)
-                    passed = evaluate_condition(op, actual, value)
+                    if classification == RuleEvaluationStatus.EVALUABLE:
+                        # EVALUABLE: evaluate the condition
+                        actual = facts.get(field)
+                        passed = evaluate_condition(op, actual, value)
 
-                    entry = {
-                        "description": desc,
-                        "field":       field,
-                        "op":          op,
-                        "value":       value,
-                        "actual":      actual,
-                        "result":      passed,
-                        "evaluable":   True,
-                        "scope":       "step",
-                    }
-                    decisions.append(entry)
+                        entry = {
+                            "description":    desc,
+                            "field":          field,
+                            "op":             op,
+                            "value":          value,
+                            "actual":         actual,
+                            "result":         passed,
+                            "evaluable":      True,
+                            "classification": "EVALUABLE",
+                            "scope":          "step",
+                        }
+                        decisions.append(entry)
 
-                    if not passed:
+                        if not passed:
+                            has_evaluable_failure = True
+                            failed_rules.append({
+                                "rule_id": None,
+                                "code":    f"STEP_RULE_FAILED:{field}:{op}",
+                                "message": desc,
+                                "classification": "EVALUABLE",
+                            })
+                            # FAIL takes precedence — halt immediately
+                            return RuleEvaluationResult(
+                                allowed=False,
+                                status="FAIL",
+                                decisions=decisions,
+                                failed_rules=failed_rules,
+                                warnings=warnings,
+                            )
+                    else:
+                        # Non-evaluable step rule
+                        has_non_evaluable = True
+                        entry = {
+                            "description":    desc,
+                            "field":          field,
+                            "op":             op,
+                            "value":          value,
+                            "evaluable":      False,
+                            "classification": classification,
+                            "scope":          "step",
+                        }
+                        decisions.append(entry)
                         failed_rules.append({
-                            "rule_id": None,
-                            "code":    f"STEP_RULE_FAILED:{field}:{op}",
-                            "message": desc,
+                            "rule_id":        None,
+                            "code":           f"STEP_RULE_NON_EVALUABLE:{classification}",
+                            "message":        desc,
+                            "classification": classification,
                         })
-                        return RuleEvaluationResult(
-                            allowed=False,
-                            decisions=decisions,
-                            failed_rules=failed_rules,
-                            warnings=warnings,
+                        warnings.append(
+                            f"Step rule ({classification}): {desc} requires manual review"
                         )
 
             # ── Role check ────────────────────────────────────────────────────
@@ -163,10 +229,25 @@ class RuntimeRuleEngine:
                 if role_warning:
                     warnings.append(role_warning)
 
+            # ── Determine final status ─────────────────────────────────────────
+            if has_evaluable_failure:
+                # Should not reach here (early return above), but defensive
+                status = "FAIL"
+                allowed = False
+            elif has_non_evaluable:
+                # At least one non-evaluable rule — requires review
+                status = "REVIEW_REQUIRED"
+                allowed = False
+            else:
+                # All evaluable rules passed
+                status = "PASS"
+                allowed = True
+
             return RuleEvaluationResult(
-                allowed=True,
+                allowed=allowed,
+                status=status,
                 decisions=decisions,
-                failed_rules=[],
+                failed_rules=failed_rules if not allowed else [],
                 warnings=warnings,
             )
 
@@ -181,6 +262,7 @@ class RuntimeRuleEngine:
             )
             return RuleEvaluationResult(
                 allowed=False,
+                status="ERROR",
                 decisions=[],
                 failed_rules=[{"rule_id": None, "code": "INTERNAL_ERROR", "message": str(exc)}],
                 warnings=[],

@@ -1,0 +1,92 @@
+BANK ALPHA PERSONAL LOAN PROGRAM
+================================
+
+Eligibility Criteria & Terms
+Version 1.0 | Effective Date: 2026-01-01
+
+---
+
+1. APPLICANT DEMOGRAPHICS
+
+The Personal Loan Program is open to Indian residents meeting the following age criteria:
+- Applicant age must be between 21 and 65 years (inclusive)
+- Self-employed and salaried professionals are eligible
+- Joint applications with valid co-applicants are accepted
+
+---
+
+2. CREDIT ASSESSMENT
+
+All applicants undergo a comprehensive credit evaluation based on credit history:
+- Minimum CIBIL credit score required: 650
+- Credit score evaluation is mandatory for all loan amounts
+- Applicants with scores below 650 may reapply after 6 months of credit history improvement
+
+---
+
+3. INCOME VERIFICATION
+
+Applicants must demonstrate stable and verifiable income:
+- Monthly salary must exceed ₹25,000 (twenty-five thousand rupees)
+- Income verification through payroll records, ITR, or bank statements required
+- Minimum 2 years of consistent income history required
+
+---
+
+4. LOAN AMOUNT LIMITS
+
+Loan amounts are constrained by the following policy:
+- Minimum loan amount: ₹50,000 (fifty thousand rupees)
+- Maximum loan amount: ₹25,00,000 (twenty-five lakhs rupees)
+- Loan amounts beyond ₹10 lakhs require additional collateral documentation
+
+---
+
+5. APPLICABLE INTEREST RATES
+
+Interest rates are determined based on credit profile and market conditions:
+- Applicable interest rates range from 9.5% to 15% per annum
+- Rates are set per RBI guidelines and Bank Alpha's internal policy mandate
+- Lower rates apply to higher credit scores
+- Rate adjustments follow quarterly market reviews
+
+---
+
+6. EMPLOYMENT DOCUMENTATION REQUIREMENTS
+
+Salaried applicants must provide comprehensive employment history:
+- Minimum 2 years of employment history is mandatory
+- Required documents: Salary slips (last 12 months), Offer letter, Form 16
+- Self-employed applicants require additional business registration and ITR documents
+- Employment verification may be conducted directly with employer
+
+---
+
+7. SPECIAL PROGRAMS
+
+Premium programs are available for select categories:
+- Employees of partner organizations are eligible for pre-approved loans up to ₹10 lakhs
+- Pre-approved loans follow streamlined approval process per corporate tie-up agreement
+- Corporate lending policy mandates expedited document verification
+- Partner company employees may receive preferential interest rates
+
+---
+
+8. COLLATERAL REQUIREMENTS
+
+Personal loans may be structured with optional collateral backing:
+- Acceptable collateral includes: fixed deposits, securities, or property
+- Collateral pledging is optional for loans below ₹5 lakhs
+- Collateral pledging is mandatory for loans exceeding ₹10 lakhs
+- Collateral valuation and insurance requirements apply per standard norms
+
+---
+
+POLICY STATEMENT
+
+This Personal Loan Program is governed by Bank Alpha's lending mandate, RBI regulations,
+and internal credit policies. All applicants must comply with Know Your Customer (KYC)
+requirements and Anti-Money Laundering (AML) guidelines. The bank reserves the right to
+decline applications based on credit assessment outcomes.
+
+Document Reference: BAPL-2026-V1.0

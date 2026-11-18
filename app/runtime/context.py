@@ -90,9 +90,16 @@ class RuleEvaluationResult:
     Structured result from the rule engine layer.
 
     Never return a plain bool — callers need to know WHY a rule failed.
+
+    Status values:
+      PASS              — all evaluable rules satisfied; no non-evaluable rules
+      FAIL              — at least one evaluable rule failed
+      REVIEW_REQUIRED   — at least one rule is non-evaluable (requires human review)
+      ERROR             — engine error during evaluation
     """
 
     allowed: bool
+    status: str = "PASS"  # One of: PASS, FAIL, REVIEW_REQUIRED, ERROR
     decisions: list[dict] = field(default_factory=list)
     failed_rules: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -100,6 +107,7 @@ class RuleEvaluationResult:
     def to_dict(self) -> dict:
         return {
             "allowed":      self.allowed,
+            "status":       self.status,
             "decisions":    self.decisions,
             "failed_rules": self.failed_rules,
             "warnings":     self.warnings,
