@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy import Column, ForeignKey, Integer, Text, String, DateTime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
@@ -25,6 +25,25 @@ class WorkflowBusinessRule(Base):
     responsible_role = Column(Text, nullable=True)
     threshold = Column(Text, nullable=True)
     embedding = Column(Vector(EMBEDDING_DIM), nullable=True)
+
+    # ── Phase 2B: Embedding Model & Version Metadata ────────────────────────────
+    # These columns track which embedding model generated this vector and when.
+    # Nullable to preserve backward compatibility with existing embeddings.
+    # Used for stale embedding detection (no automatic regeneration).
+    embedding_model_name = Column(
+        String(255),
+        nullable=True,
+    )
+
+    embedding_model_version = Column(
+        String(64),
+        nullable=True,
+    )
+
+    embedding_generated_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # ── Provenance: source document ───────────────────────────────────────────
     # FK to the BRDDocument this rule was extracted from.

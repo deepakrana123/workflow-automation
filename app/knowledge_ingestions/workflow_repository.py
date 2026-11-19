@@ -179,6 +179,19 @@ class WorkflowRepository:
             mapping.top_candidates = top_candidates
         self.db.flush()
 
+    # Phase 6: Embedding consistency checks
+    def count_null_action_embeddings(self) -> int:
+        """Count ActionDefinition records with NULL embeddings."""
+        return self.db.query(func.count(ActionDefinition.id)).filter(
+            ActionDefinition.embedding.is_(None)
+        ).scalar() or 0
+
+    def count_null_trigger_embeddings(self) -> int:
+        """Count TriggerDefinition records with NULL embeddings."""
+        return self.db.query(func.count(TriggerDefinition.id)).filter(
+            TriggerDefinition.embedding.is_(None)
+        ).scalar() or 0
+
     def mark_trigger_unmapped(
         self,
         mapping_id: int,

@@ -27,3 +27,19 @@ class EmbeddingService:
             aliases,
         ]
         return " ".join(p for p in parts if p).strip()
+
+    def build_rule_text(self, rule) -> str:
+        """
+        Construct searchable text from a WorkflowBusinessRule.
+        
+        Concatenates rule, condition, outcome, responsible_role, and threshold
+        to build a rich semantic representation for embedding and retrieval.
+        """
+        parts = [
+            rule.rule or "",
+            rule.condition or "",
+            rule.outcome or "",
+            rule.responsible_role or "",
+            rule.threshold or "",
+        ]
+        return " ".join(p for p in parts if p).strip()

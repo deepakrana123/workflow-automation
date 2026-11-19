@@ -33,3 +33,22 @@ class TriggerDefinition(Base):
     updated_at = Column(DateTime)
     
     embedding = Column(Vector(384), nullable=True)
+
+    # ── Phase 2B: Embedding Model & Version Metadata ────────────────────────────
+    # These columns track which embedding model generated this vector and when.
+    # Nullable to preserve backward compatibility with existing embeddings.
+    # Used for stale embedding detection (no automatic regeneration).
+    embedding_model_name = Column(
+        String(255),
+        nullable=True,
+    )
+
+    embedding_model_version = Column(
+        String(64),
+        nullable=True,
+    )
+
+    embedding_generated_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
